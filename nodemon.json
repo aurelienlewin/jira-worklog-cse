@@ -1,0 +1,15 @@
+{
+  "watch": ["server"],
+  "ext": "js,mjs,json",
+  "ignore": [
+    "dist/**",
+    "src/**",
+    "node_modules/**",
+    ".git/**",
+    ".mcp-atlassian-venv/**",
+    "README.md",
+    "CHANGELOG.md",
+    "package-lock.json"
+  ],
+  "delay": "400ms"
+}

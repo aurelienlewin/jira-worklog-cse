@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.11] - 2026-03-13 13:23 CET
+
+### Fixed
+
+- Stabilized API dev process by scoping `nodemon` watch to `server/` only and ignoring frontend/build/docs artifacts.
+- Reduced random dev-time API restarts causing Vite proxy errors (`socket hang up`, `ECONNREFUSED`) during `/api/...` requests.
+
 ## [1.16.10] - 2026-03-13 13:20 CET
 
 ### Changed
