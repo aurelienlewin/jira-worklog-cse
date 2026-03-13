@@ -11,6 +11,8 @@ const API_PORT = Number(process.env.API_PORT || 8787);
 const JIRA_URL = 'https://dev.osf.digital';
 const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
 const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
+const ANNUAL_LEAVES_ISSUE_KEY = 'ZLH-1';
+const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const DEFAULT_DETAILED_PROJECT_KEYS = ['OSFO', 'ROEMO'];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = 'mcp-atlassian-dev-osf';
@@ -345,6 +347,26 @@ async function mapLimit(items, limit, worker) {
   return results;
 }
 
+async function searchAllIssuesByJql(token, jql, fields, maxResults = 100) {
+  const allIssues = [];
+  let startAt = 0;
+
+  while (true) {
+    const page = await jiraFetchJson(
+      token,
+      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=${encodeURIComponent(fields)}`
+    );
+
+    const issues = page.issues || [];
+    allIssues.push(...issues);
+    startAt += issues.length;
+
+    if (startAt >= (page.total || 0) || issues.length === 0) break;
+  }
+
+  return allIssues;
+}
+
 function normalizeProjectKeys(inputKeys) {
   if (!Array.isArray(inputKeys) || !inputKeys.length) {
     return [...DEFAULT_DETAILED_PROJECT_KEYS];
@@ -356,23 +378,8 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   const me = await jiraFetchJson(token, '/rest/api/2/myself');
   const detailedSet = new Set(normalizeProjectKeys(detailedProjectKeys));
 
-  const allIssues = [];
-  let startAt = 0;
-  const maxResults = 100;
   const jql = 'worklogAuthor = currentUser() AND worklogDate >= "2025-01-01" AND worklogDate <= "2025-12-31"';
-
-  while (true) {
-    const page = await jiraFetchJson(
-      token,
-      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=project,key,summary,issuetype,parent`
-    );
-
-    const issues = page.issues || [];
-    allIssues.push(...issues);
-
-    startAt += issues.length;
-    if (startAt >= (page.total || 0) || issues.length === 0) break;
-  }
+  const allIssues = await searchAllIssuesByJql(token, jql, 'project,key,summary,issuetype,parent');
 
   const byProject = new Map();
   const detailedByProject = new Map();
@@ -518,6 +525,77 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   };
 }
 
+async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY) {
+  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+  const leavesIssues = await searchAllIssuesByJql(
+    token,
+    `issuekey = ${rootIssueKey} OR parent = ${rootIssueKey}`,
+    'key,summary,status,issuetype,parent'
+  );
+
+  let keptWorklogs = 0;
+  let totalSeconds = 0;
+  const issues = [];
+
+  for (const issue of leavesIssues) {
+    const issueKey = issue.key;
+    const issueSummary = issue.fields?.summary || 'Sans titre';
+    const issueType = issue.fields?.issuetype?.name || 'Issue';
+    const status = issue.fields?.status?.name || 'Inconnu';
+    const parentKey = issue.fields?.parent?.key || null;
+
+    let wlStart = 0;
+    const wlMax = 1000;
+    let issueSeconds = 0;
+
+    while (true) {
+      const logs = await jiraFetchJson(
+        token,
+        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
+      );
+      const worklogs = logs.worklogs || [];
+
+      for (const wl of worklogs) {
+        if (!inDateRange(wl.started)) continue;
+        if (!sameUser(wl.author, me)) continue;
+        const seconds = Number(wl.timeSpentSeconds || 0);
+        if (!seconds) continue;
+        keptWorklogs += 1;
+        issueSeconds += seconds;
+      }
+
+      wlStart += worklogs.length;
+      if (wlStart >= (logs.total || 0) || worklogs.length === 0) break;
+    }
+
+    totalSeconds += issueSeconds;
+    issues.push({
+      issueKey,
+      summary: issueSummary,
+      issueType,
+      status,
+      parentKey,
+      seconds: issueSeconds,
+      hours: Number((issueSeconds / 3600).toFixed(2)),
+      days: Number((issueSeconds / 3600 / WORKING_DAY_HOURS).toFixed(2)),
+    });
+  }
+
+  issues.sort((a, b) => b.seconds - a.seconds);
+  const totalHours = Number((totalSeconds / 3600).toFixed(2));
+  const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
+
+  return {
+    issueKey: rootIssueKey,
+    issueCount: issues.length,
+    worklogCount: keptWorklogs,
+    totalHours,
+    totalDays,
+    workingDayHours: WORKING_DAY_HOURS,
+    issues,
+  };
+}
+
 app.get('/api/health', (_, res) => {
   res.json({ ok: true, port: API_PORT });
 });
@@ -589,6 +667,21 @@ app.post('/api/jira/report', async (req, res) => {
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erreur lors du chargement des heures 2025' });
+  }
+});
+
+app.post('/api/jira/leaves', async (req, res) => {
+  try {
+    const token = await getTokenFromRequestOrConfig(req.body?.token);
+    if (!token) {
+      res.status(400).json({ error: "Aucune cle d'acces trouvee." });
+      return;
+    }
+
+    const leaves = await collectAnnualLeaves2025(token, req.body?.issueKey || ANNUAL_LEAVES_ISSUE_KEY);
+    res.json(leaves);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Erreur lors du chargement des conges annuels' });
   }
 });
 

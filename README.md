@@ -17,15 +17,17 @@ Le parcours est organise en 4 etapes claires:
 1. Creer le PAT Jira
 2. Lire le guide Codex
 3. Configurer et verifier la connexion
-4. Charger le rapport des heures 2025
+4. Charger le rapport des heures et conges 2025
 
-L'application affiche des etats de chargement explicites et du feedback en direct.
+L'application affiche des etats de chargement explicites et des toasts cumulatives dismissables.
 Le theme visuel est volontairement clair et apaisant (printemps, lever de soleil, ambiance campagne).
+La cle d'acces est memorisee dans la session navigateur pour reprendre automatiquement sur l'etape 4.
 
 Le rapport inclut:
 
 - les heures totales par projet,
 - un detail dedie de toutes les issues (stories, tasks, bugs, sous-taches, etc.) pour `OSFO` et `ROEMO`.
+- un suivi des conges annuels base sur l'issue `ZLH-1`.
 
 ## Prerequis
 

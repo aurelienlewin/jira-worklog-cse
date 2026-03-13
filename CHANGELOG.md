@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-03-13 12:20 CET
+
+### Added
+
+- Added annual leaves tracking endpoint and UI panel based on `ZLH-1`.
+- Added dismissable cumulative toast notifications for progress messages.
+
+### Changed
+
+- Persisted token in browser session and auto-resume directly to step 4 when connection check succeeds.
+- Hid all hours/details panels until the user is on step 4.
+
 ## [1.8.0] - 2026-03-13 12:08 CET
 
 ### Changed
