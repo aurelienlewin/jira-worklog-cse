@@ -265,6 +265,9 @@ export default function App() {
     };
   }, [report, leaves]);
 
+  const hasBenchHours = Number(summary.benchHours || 0) > 0;
+  const hasLeavesHours = Number(summary.leavesHours || 0) > 0;
+
   const benchDetails = useMemo(() => {
     return report?.detailedProjects?.find((project) => project.projectKey === BENCH_SCOPE_KEY) || null;
   }, [report]);
@@ -317,7 +320,7 @@ export default function App() {
     const trackedHours = summary.workedHours + summary.leavesHours;
     const workedShare = trackedHours > 0 ? (summary.workedHours / trackedHours) * 100 : 0;
     const leavesShare = trackedHours > 0 ? (summary.leavesHours / trackedHours) * 100 : 0;
-    return [
+    const circles = [
       {
         title: 'Utilisation',
         subtitle: '100 % - taux bench',
@@ -325,25 +328,33 @@ export default function App() {
         tone: 'leaf',
       },
       {
-        title: 'Part bench',
-        subtitle: `${formatNumber(summary.benchHours)} h sur vos heures 2025`,
-        value: summary.benchRate,
-        tone: 'sun',
-      },
-      {
         title: 'Part heures travaillées',
         subtitle: `${formatNumber(summary.workedHours)} h`,
         value: workedShare,
         tone: 'sky',
       },
-      {
+    ];
+
+    if (hasBenchHours) {
+      circles.push({
+        title: 'Part bench',
+        subtitle: `${formatNumber(summary.benchHours)} h sur vos heures 2025`,
+        value: summary.benchRate,
+        tone: 'sun',
+      });
+    }
+
+    if (hasLeavesHours) {
+      circles.push({
         title: 'Part congés/absences',
         subtitle: `${formatNumber(summary.leavesHours)} h (${formatNumber(summary.leavesDays)} jours)`,
         value: leavesShare,
         tone: 'rose',
-      },
-    ];
-  }, [summary]);
+      });
+    }
+
+    return circles;
+  }, [summary, hasBenchHours, hasLeavesHours]);
 
   const analysisInfo = useMemo(() => {
     const fromReport = report?.user || null;
@@ -1215,18 +1226,22 @@ export default function App() {
                   <p>{formatNumber(summary.workedHours)} h</p>
                   <small>Total des heures de travail en 2025.</small>
                 </article>
-                <article className="summary-card">
-                  <h4>🌴 Heures de congés</h4>
-                  <p>{formatNumber(summary.leavesHours)} h</p>
-                  <small>Soit {formatNumber(summary.leavesDays)} jours.</small>
-                </article>
-                <article className="summary-card">
-                  <h4>🧱 Taux bench</h4>
-                  <p>{formatPercent(summary.benchRate)}</p>
-                  <small>
-                    Calculé depuis {BENCH_SCOPE_KEY} ({formatNumber(summary.benchHours)} h).
-                  </small>
-                </article>
+                {hasLeavesHours ? (
+                  <article className="summary-card">
+                    <h4>🌴 Heures de congés</h4>
+                    <p>{formatNumber(summary.leavesHours)} h</p>
+                    <small>Soit {formatNumber(summary.leavesDays)} jours.</small>
+                  </article>
+                ) : null}
+                {hasBenchHours ? (
+                  <article className="summary-card">
+                    <h4>🧱 Taux bench</h4>
+                    <p>{formatPercent(summary.benchRate)}</p>
+                    <small>
+                      Calculé depuis {BENCH_SCOPE_KEY} ({formatNumber(summary.benchHours)} h).
+                    </small>
+                  </article>
+                ) : null}
                 <article className="summary-card">
                   <h4>✅ Taux d'utilisation</h4>
                   <p>{formatPercent(summary.utilizationRate)}</p>
@@ -1293,10 +1308,9 @@ export default function App() {
                 <p className="section-state">⏳ En attente du chargement des données bench.</p>
               ) : null}
               <p className="bench-summary">{benchNarrative}</p>
-              {!benchDetails ? (
+              {!benchDetails || !benchDetails.issues?.length || !hasBenchHours ? (
                 <p>
-                  Aucun détail bench pour le moment. Lancez le chargement 2025 pour récupérer
-                  les sous-tâches et la répartition par type d'issue.
+                  Aucun détail bench (&gt; 0h) pour le moment.
                 </p>
               ) : (
                 <>
@@ -1514,7 +1528,7 @@ export default function App() {
               {!isLeavesReady ? (
                 <p className="section-state">⏳ En attente du chargement des congés et absences.</p>
               ) : null}
-              {!leaves?.issues?.length ? (
+              {!leaves?.issues?.length || !hasLeavesHours ? (
                 <p>Pas de congés/absences chargés pour le moment.</p>
               ) : (
                 <>
