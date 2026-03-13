@@ -390,6 +390,47 @@ function normalizeIdentity(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeTextForMatch(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function extractLeaveTargetFromComment(comment) {
+  const text = String(comment || '');
+  const match = text.match(/Leave Day record for user\s*:\s*([^,]+)/i);
+  return match?.[1]?.trim() || '';
+}
+
+function makeLeaveUserMatchers(userContext) {
+  const target = userContext?.targetUser || {};
+  const fullNameFromEmail = String(target.emailAddress || '')
+    .split('@')[0]
+    .replace(/[._-]+/g, ' ')
+    .trim();
+
+  const candidates = uniqueNonEmpty([
+    target.displayName,
+    target.name,
+    target.emailAddress,
+    userContext?.requestedEmail,
+    fullNameFromEmail,
+  ]).map((value) => normalizeTextForMatch(value));
+
+  return candidates.filter(Boolean);
+}
+
+function isWorklogForLeaveTarget(worklog, userContext, matchTokens) {
+  if (sameUser(worklog?.author, userContext?.targetUser)) return true;
+  const leaveUserName = extractLeaveTargetFromComment(worklog?.comment);
+  if (!leaveUserName) return false;
+  const normalized = normalizeTextForMatch(leaveUserName);
+  if (!normalized) return false;
+  return matchTokens.some((token) => normalized.includes(token) || token.includes(normalized));
+}
+
 function uniqueNonEmpty(values) {
   return [...new Set((values || []).map((v) => String(v || '').trim()).filter(Boolean))];
 }
@@ -685,61 +726,36 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
 async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY, requestedEmail = '') {
   const userContext = await resolveTargetUser(token, requestedEmail);
   const normalizedRootKey = String(rootIssueKey || ANNUAL_LEAVES_ISSUE_KEY).trim().toUpperCase();
-  const escapedRootKey = escapeJqlString(normalizedRootKey);
   const leavesProjectKey = normalizedRootKey.includes('-') ? normalizedRootKey.split('-')[0] : normalizedRootKey;
   const fields = 'key,summary,status,issuetype,parent';
   const issueByKey = new Map();
   const discoveryLogs = [...userContext.notes];
   let usedFallbackScope = false;
 
-  for (const authorScope of userContext.authorScopes) {
-    const projectScopeJql =
-      `${authorScope} ` +
-      'AND worklogDate >= "2025-01-01" ' +
-      'AND worklogDate <= "2025-12-31" ' +
-      `AND project = ${leavesProjectKey}`;
-
-    const projectScopeResult = await searchIssuesByJqlSafe(token, projectScopeJql, fields);
-    if (!projectScopeResult.ok) {
-      discoveryLogs.push(`Projet ${leavesProjectKey} non accessible avec ${authorScope}.`);
-      continue;
-    }
-    for (const issue of projectScopeResult.issues) {
+  const projectResult = await searchIssuesByJqlSafe(token, `project = ${leavesProjectKey}`, fields);
+  if (projectResult.ok) {
+    for (const issue of projectResult.issues) {
       issueByKey.set(issue.key, issue);
     }
-  }
-
-  if (!issueByKey.size) {
-    const scopeQueries = [
-      `issuekey = ${normalizedRootKey}`,
-      `parent = ${normalizedRootKey}`,
-      `"Epic Link" = ${normalizedRootKey}`,
-      `"Parent Link" = ${normalizedRootKey}`,
-      `issue in linkedIssues("${escapedRootKey}")`,
-    ];
-
-    for (const authorScope of userContext.authorScopes) {
-      for (const scope of scopeQueries) {
-        const jql =
-          `${authorScope} ` +
-          'AND worklogDate >= "2025-01-01" ' +
-          'AND worklogDate <= "2025-12-31" ' +
-          `AND (${scope})`;
-        const result = await searchIssuesByJqlSafe(token, jql, fields);
-        if (!result.ok) {
-          discoveryLogs.push(`Filtre non disponible: ${scope} / ${authorScope}`);
-          continue;
-        }
-        for (const issue of result.issues) {
-          issueByKey.set(issue.key, issue);
-        }
+    discoveryLogs.push(
+      `Périmètre congés chargé via le projet ${leavesProjectKey} (${projectResult.issues.length} tickets).`
+    );
+  } else {
+    usedFallbackScope = true;
+    discoveryLogs.push(`Projet ${leavesProjectKey} inaccessible (${projectResult.error}).`);
+    const authorScope = 'worklogAuthor = currentUser()';
+    const fallbackJql =
+      `${authorScope} AND worklogDate >= "2025-01-01" AND worklogDate <= "2025-12-31" AND project = ${leavesProjectKey}`;
+    const fallbackResult = await searchIssuesByJqlSafe(token, fallbackJql, fields);
+    if (fallbackResult.ok) {
+      for (const issue of fallbackResult.issues) {
+        issueByKey.set(issue.key, issue);
       }
     }
-
-    usedFallbackScope = true;
   }
 
   const leavesIssues = [...issueByKey.values()];
+  const leaveUserTokens = makeLeaveUserMatchers(userContext);
 
   let keptWorklogs = 0;
   let totalSeconds = 0;
@@ -766,7 +782,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
 
       for (const wl of worklogs) {
         if (!inDateRange(wl.started)) continue;
-        if (!sameUser(wl.author, userContext.targetUser)) continue;
+        if (!isWorklogForLeaveTarget(wl, userContext, leaveUserTokens)) continue;
         const seconds = Number(wl.timeSpentSeconds || 0);
         if (!seconds) continue;
         keptWorklogs += 1;
@@ -831,6 +847,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
     discovery: {
       projectKey: leavesProjectKey,
       usedFallbackScope,
+      userMatchMode: 'author_or_comment',
       sourceIssueCount: leavesIssues.length,
       notes: discoveryLogs,
     },

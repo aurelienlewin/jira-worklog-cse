@@ -172,6 +172,51 @@ export default function App() {
     ];
   }, [summary]);
 
+  const analysisInfo = useMemo(() => {
+    const fromReport = report?.user || null;
+    const fromLeaves = leaves?.user || null;
+    const resolvedEmail =
+      fromLeaves?.resolvedEmail ||
+      fromReport?.resolvedEmail ||
+      String(targetEmail || '').trim() ||
+      'Votre compte';
+    const mode = fromLeaves?.mode || fromReport?.mode || 'current';
+    const fallback = mode === 'fallback_current';
+    const delegated = mode === 'delegated';
+
+    let message = 'Analyse de vos données.';
+    if (delegated) {
+      message = 'Analyse d’un autre compte (selon les droits du PAT).';
+    } else if (fallback) {
+      message = "L'e-mail demandé n'a pas été trouvé: affichage de votre compte.";
+    }
+
+    return { resolvedEmail, mode, message, fallback, delegated };
+  }, [report, leaves, targetEmail]);
+
+  const benchNarrative = useMemo(() => {
+    if (!benchDetails?.issues?.length) {
+      return 'Aucune activité bench détectée pour 2025.';
+    }
+    const topType = benchDetails.issueTypeTotals?.[0];
+    const topIssue = benchDetails.issues?.[0];
+    const subtaskShare =
+      Number(benchDetails.issueHours || 0) > 0
+        ? (Number(benchDetails.subtaskHours || 0) / Number(benchDetails.issueHours || 0)) * 100
+        : 0;
+    const parts = [
+      `Vous avez saisi ${formatNumber(benchDetails.issueHours)} h sur ${benchDetails.issueCount} tickets bench.`,
+      topType
+        ? `Le type principal est "${topType.issueType}" avec ${formatNumber(topType.hours)} h.`
+        : null,
+      `Les sous-tâches représentent ${formatPercent(subtaskShare)} du temps bench.`,
+      topIssue
+        ? `Le ticket le plus chargé est ${topIssue.issueKey} (${formatNumber(topIssue.hours)} h).`
+        : null,
+    ].filter(Boolean);
+    return parts.join(' ');
+  }, [benchDetails]);
+
   function addToast(message, tone = 'info') {
     setToasts((prev) => [...prev, makeToast(message, tone)]);
   }
@@ -739,6 +784,10 @@ export default function App() {
           <>
             <section className="glass feedback-card reveal">
               <h3>🧮 Résumé 2025</h3>
+              <div className={`account-badge ${analysisInfo.fallback ? 'warn' : analysisInfo.delegated ? 'info' : 'ok'}`}>
+                <strong>Compte analysé : {analysisInfo.resolvedEmail}</strong>
+                <span>{analysisInfo.message}</span>
+              </div>
               <div className="progress-dashboard">
                 {progressCircles.map((item) => (
                   <ProgressCircle
@@ -825,6 +874,7 @@ export default function App() {
 
             <section className="glass feedback-card reveal">
               <h3>🧱 Détail du bench ({BENCH_PROJECT_KEY})</h3>
+              <p className="bench-summary">{benchNarrative}</p>
               {!benchDetails ? (
                 <p>
                   Aucun détail bench pour le moment. Lancez le chargement 2025 pour récupérer

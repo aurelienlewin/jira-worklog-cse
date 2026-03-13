@@ -137,22 +137,25 @@ body,
 .loading-strip {
   max-width: 980px;
   margin: 0 auto 16px;
-  border-radius: 12px;
-  padding: 10px 14px;
+  border-radius: 14px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #557149;
-  background: var(--panel-strong);
+  color: #24412a;
+  border: 2px solid rgba(98, 143, 92, 0.5);
+  background: linear-gradient(145deg, rgba(237, 251, 229, 0.96), rgba(254, 240, 217, 0.95));
   animation: pulseStrip 2.1s ease-in-out infinite;
 }
 
 .data-progress {
   max-width: 980px;
-  margin: 0 auto 16px;
+  margin: 0 auto 18px;
   border-radius: 14px;
-  padding: 12px 14px;
-  background: var(--panel-strong);
+  padding: 14px 16px;
+  border: 2px solid rgba(98, 143, 92, 0.5);
+  box-shadow: 0 12px 20px rgba(123, 146, 102, 0.18);
+  background: linear-gradient(145deg, rgba(237, 251, 229, 0.96), rgba(254, 240, 217, 0.95));
 }
 
 .data-progress-top {
@@ -473,6 +476,48 @@ body,
 
 .summary-card small {
   color: var(--muted);
+}
+
+.account-badge {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(107, 141, 89, 0.35);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.account-badge strong {
+  color: #2d4b2c;
+}
+
+.account-badge span {
+  color: #50694a;
+  font-size: 13px;
+}
+
+.account-badge.warn {
+  border-color: rgba(195, 143, 61, 0.6);
+  background: rgba(255, 248, 231, 0.86);
+}
+
+.account-badge.warn strong {
+  color: #6b4a1f;
+}
+
+.account-badge.info {
+  border-color: rgba(93, 142, 154, 0.55);
+  background: rgba(239, 249, 250, 0.88);
+}
+
+.bench-summary {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(145, 170, 118, 0.28);
+  background: rgba(255, 255, 255, 0.68);
+  color: #4f6949;
 }
 
 label {

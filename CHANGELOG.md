@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-03-13 12:39 CET
+
+### Changed
+
+- Added an explicit “Compte analysé” badge in step 4 (including fallback warning when target email cannot be resolved).
+- Made loading/progress states more visually distinct from regular panels.
+- Added a French bench summary block highlighting key insights (hours, top type, top ticket, subtask share).
+- Deepened leaves matching logic: scans the whole `ZLH` project scope and matches target user by worklog author or leave-comment user marker.
+
 ## [1.15.0] - 2026-03-13 12:28 CET
 
 ### Changed
