@@ -12,6 +12,7 @@ Application locale (React + Node.js) pour visualiser simplement les heures 2025,
 - affiche un taux bench et un taux d'utilisation,
 - propose des détails (types d'issue, sous-tâches, tickets complets),
 - résume les commentaires bench (avec Codex + fallback local),
+- permet d'interrompre une session restaurée et d'annuler les requêtes en cours,
 - exporte un `.xlsx` prêt à partager.
 
 ## Parcours utilisateur
@@ -25,9 +26,10 @@ L'interface est en français, orientée non technique, avec:
 
 - stepper clair,
 - états de chargement visibles,
-- toasts flottants cumulables et dismissables,
+- toasts flottants cumulables et dismissables (erreurs persistantes jusqu'au clic),
 - navigation clavier,
 - focus visibles,
+- arrêt manuel de session (même pendant une collecte auto-restaurée),
 - rendu SSR en production.
 
 ## Prérequis
@@ -58,13 +60,22 @@ cp .env.example .env.local
 VITE_TOKEN_HELP_URL="https://example.com/token"
 VITE_SETUP_GUIDE_URL="https://example.com/guide"
 VITE_ISSUE_BROWSE_BASE_URL="https://example.com"
+VITE_BENCH_SCOPE_KEY="BENCH"
+VITE_LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
+VITE_LEAVE_SCOPE_LABEL="ABS-*"
 
 # API
 ISSUE_TRACKER_URL="https://example.com"
 BENCH_SCOPE_KEY="BENCH"
 LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
+WORKING_DAY_HOURS="7"
 MCP_SERVER_SECTION="issue-tracker"
 ```
+
+Notes:
+
+- l'API charge `.env` puis `.env.local` au démarrage (`.env.local` est prioritaire),
+- si `ISSUE_TRACKER_URL` reste sur une valeur placeholder (`example.com`), l'API bloque les appels avec un message de configuration explicite.
 
 ## Scripts
 
