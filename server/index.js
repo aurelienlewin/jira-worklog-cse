@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import { constants as fsConstants } from 'fs';
 import { spawn } from 'child_process';
 import readline from 'readline';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const app = express();
 const API_PORT = Number(process.env.API_PORT || 8787);
@@ -16,6 +17,11 @@ const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = 'mcp-atlassian-dev-osf';
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(SERVER_DIR, '..');
+const CLIENT_DIST_DIR = path.join(ROOT_DIR, 'dist');
+const CLIENT_DIST_INDEX = path.join(CLIENT_DIST_DIR, 'index.html');
+const SERVER_DIST_ENTRY = path.join(ROOT_DIR, 'dist', 'server', 'entry-server.js');
 
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
@@ -228,7 +234,7 @@ async function runMcpHandshake(token) {
       cleanup({
         ok: false,
         initSeconds: null,
-        message: 'La verification de la connexion a pris trop de temps',
+        message: 'La vérification de la connexion a pris trop de temps',
         stderr: stderr.slice(-1000),
       });
     }, 25000);
@@ -834,28 +840,28 @@ app.post('/api/mcp/setup', async (req, res) => {
   try {
     const token = String(req.body?.token || '').trim();
     if (!token) {
-      res.status(400).json({ error: "La cle d'acces Jira est requise." });
+      res.status(400).json({ error: "La clé d'accès Jira est requise." });
       return;
     }
 
-    logs.push('Demarrage de la configuration automatique...');
-    logs.push('Tentative 1: configuration automatique.');
+    logs.push('Démarrage de la configuration automatique...');
+    logs.push('Tentative 1 : configuration automatique.');
 
     const codexResult = await setupViaCodexExec(token);
     const codexOk = codexResult.code === 0;
 
     if (codexOk) {
-      logs.push('Tentative 1: reussie.');
+      logs.push('Tentative 1 : réussie.');
     } else {
-      logs.push('Tentative 1: echec. Tentative 2 en cours.');
+      logs.push('Tentative 1 : échec. Tentative 2 en cours.');
       const tail = (codexResult.stderr || codexResult.stdout || '').trim().split('\n').slice(-2).join(' | ');
-      if (tail) logs.push(`Detail technique: ${tail.slice(0, 180)}`);
+      if (tail) logs.push(`Détail technique : ${tail.slice(0, 180)}`);
       await setupViaLocalPatch(token);
-      logs.push('Tentative 2: configuration locale appliquee.');
+      logs.push('Tentative 2 : configuration locale appliquée.');
     }
 
     const handshake = await runMcpHandshake(token);
-    logs.push(handshake.ok ? 'Verification de connexion: reussie.' : 'Verification de connexion: echec.');
+    logs.push(handshake.ok ? 'Vérification de connexion : réussie.' : 'Vérification de connexion : échec.');
     if (handshake.message) logs.push(handshake.message);
 
     res.json({ ok: handshake.ok, logs, handshake });
@@ -869,18 +875,18 @@ app.post('/api/mcp/check', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
-      res.status(400).json({ error: "Aucune cle d'acces trouvee.", logs });
+      res.status(400).json({ error: "Aucune clé d'accès trouvée.", logs });
       return;
     }
 
-    logs.push('Verification de la connexion en cours...');
+    logs.push('Vérification de la connexion en cours...');
     const handshake = await runMcpHandshake(token);
-    logs.push(handshake.ok ? 'Verification de connexion: reussie.' : 'Verification de connexion: echec.');
+    logs.push(handshake.ok ? 'Vérification de connexion : réussie.' : 'Vérification de connexion : échec.');
     if (handshake.message) logs.push(handshake.message);
 
     res.json({ ok: handshake.ok, logs, handshake });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erreur pendant la verification', logs });
+    res.status(500).json({ error: err.message || 'Erreur pendant la vérification', logs });
   }
 });
 
@@ -888,7 +894,7 @@ app.post('/api/jira/report', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
-      res.status(400).json({ error: "Aucune cle d'acces trouvee." });
+      res.status(400).json({ error: "Aucune clé d'accès trouvée." });
       return;
     }
 
@@ -903,7 +909,7 @@ app.post('/api/jira/leaves', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
-      res.status(400).json({ error: "Aucune cle d'acces trouvee." });
+      res.status(400).json({ error: "Aucune clé d'accès trouvée." });
       return;
     }
 
@@ -914,10 +920,60 @@ app.post('/api/jira/leaves', async (req, res) => {
     );
     res.json(leaves);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erreur lors du chargement des conges annuels' });
+    res.status(500).json({ error: err.message || 'Erreur lors du chargement des congés annuels' });
   }
 });
 
-app.listen(API_PORT, '127.0.0.1', () => {
-  console.log(`API ready on http://localhost:${API_PORT}`);
+async function setupFrontendRoutes() {
+  if (!(await fileExists(CLIENT_DIST_INDEX))) return;
+
+  app.use(express.static(CLIENT_DIST_DIR, { index: false }));
+
+  const template = await fs.readFile(CLIENT_DIST_INDEX, 'utf8');
+  let render = null;
+
+  if (await fileExists(SERVER_DIST_ENTRY)) {
+    try {
+      const moduleUrl = `${pathToFileURL(SERVER_DIST_ENTRY).href}?v=${Date.now()}`;
+      const ssrModule = await import(moduleUrl);
+      if (typeof ssrModule.render === 'function') {
+        render = ssrModule.render;
+      }
+    } catch (err) {
+      console.warn(`SSR disabled: ${err.message}`);
+    }
+  }
+
+  app.get('*', async (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+
+    try {
+      if (!render) {
+        res.sendFile(CLIENT_DIST_INDEX);
+        return;
+      }
+
+      const appHtml = await render(req.originalUrl || '/');
+      const html = template.replace('<!--ssr-outlet-->', appHtml);
+      res.status(200).setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(html);
+    } catch (err) {
+      next(err);
+    }
+  });
+}
+
+async function startServer() {
+  await setupFrontendRoutes();
+  app.listen(API_PORT, '127.0.0.1', () => {
+    console.log(`API ready on http://localhost:${API_PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error(`Startup error: ${err.message}`);
+  process.exit(1);
 });

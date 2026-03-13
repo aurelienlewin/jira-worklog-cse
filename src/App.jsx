@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const PAT_URL =
   'https://dev.osf.digital/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens';
@@ -77,6 +77,7 @@ export default function App() {
   const [busyAction, setBusyAction] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
+  const stepButtonRefs = useRef([]);
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -232,7 +233,7 @@ export default function App() {
       setReportProgress({ active: true, value: 100, label: 'Données prêtes.' });
       const userLabel = leavesData?.user?.resolvedEmail || hoursData?.user?.resolvedEmail || activeUserEmail || '';
       if (userLabel) {
-        addToast(`👤 Analyse réalisée pour: ${userLabel}`, 'info');
+        addToast(`👤 Analyse réalisée pour : ${userLabel}`, 'info');
       }
       addToast(
         `✅ Rapport chargé : ${formatNumber(hoursData.totalHours)} h de travail en 2025.`,
@@ -303,7 +304,7 @@ export default function App() {
         }
       } else {
         setStep(2);
-        addToast('⚠️ Connexion non validée. Revenez à l étape 3.', 'warn');
+        addToast("⚠️ Connexion non validée. Revenez à l'étape 3.", 'warn');
       }
     } catch (err) {
       setStep(2);
@@ -320,7 +321,7 @@ export default function App() {
     if (!savedToken) return;
 
     setToken(savedToken);
-    addToast('ℹ️ Clé d accès retrouvée dans cette session.', 'info');
+    addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
     runCheck(savedToken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -353,6 +354,24 @@ export default function App() {
     setStep((prev) => prev - 1);
   }
 
+  function handleStepKeyDown(event, index) {
+    let targetIndex = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      targetIndex = Math.min(STEPS.length - 1, index + 1);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      targetIndex = Math.max(0, index - 1);
+    } else if (event.key === 'Home') {
+      targetIndex = 0;
+    } else if (event.key === 'End') {
+      targetIndex = STEPS.length - 1;
+    }
+
+    if (targetIndex === null) return;
+    event.preventDefault();
+    setStep(targetIndex);
+    stepButtonRefs.current[targetIndex]?.focus();
+  }
+
   function clearTokenAndRestart() {
     setToken('');
     setTargetEmail('');
@@ -367,15 +386,44 @@ export default function App() {
 
   async function exportExcel() {
     if (!report || !leaves) {
-      addToast('⚠️ Chargez d abord les données 2025 avant d exporter.', 'warn');
+      addToast("⚠️ Chargez d'abord les données 2025 avant d'exporter.", 'warn');
       return;
     }
 
     setIsExporting(true);
     try {
       addToast('📦 Préparation du fichier Excel...', 'info');
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.utils.book_new();
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Jira Worklog CSE';
+      workbook.created = new Date();
+
+      function addWorksheet(sheetName, rows) {
+        const sheet = workbook.addWorksheet(sheetName);
+        const safeRows = rows.length ? rows : [{ Information: 'Aucune donnée' }];
+        const headers = Object.keys(safeRows[0]);
+
+        sheet.columns = headers.map((header) => ({
+          header,
+          key: header,
+          width: Math.max(14, Math.min(48, header.length + 4)),
+        }));
+
+        safeRows.forEach((row) => {
+          sheet.addRow(row);
+        });
+
+        const headerRow = sheet.getRow(1);
+        headerRow.font = { bold: true, color: { argb: 'FF2E4A2E' } };
+        headerRow.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFEAF4DC' },
+        };
+        headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
+        sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      }
+
       const analysedUser =
         leaves?.user?.resolvedEmail ||
         report?.user?.resolvedEmail ||
@@ -384,7 +432,7 @@ export default function App() {
       const generatedAt = new Date().toLocaleString('fr-FR');
 
       const summaryRows = [
-        { Indicateur: 'Date d export', Valeur: generatedAt },
+        { Indicateur: "Date d'export", Valeur: generatedAt },
         { Indicateur: 'Utilisateur analysé', Valeur: analysedUser },
         { Indicateur: 'Total heures travaillées 2025', Valeur: summary.workedHours },
         { Indicateur: 'Total heures congés/absences 2025', Valeur: summary.leavesHours },
@@ -393,7 +441,7 @@ export default function App() {
         { Indicateur: 'Taux WAROE (%)', Valeur: Number(summary.waroeRate.toFixed(2)) },
         { Indicateur: "Taux d'utilisation (%)", Valeur: Number(summary.utilizationRate.toFixed(2)) },
       ];
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Synthese');
+      addWorksheet('Synthèse', summaryRows);
 
       const projectRows = (report.projects || []).map((project) => ({
         Projet: project.projectKey,
@@ -405,58 +453,55 @@ export default function App() {
         Nom: 'Activités 2025',
         Heures: Number(report.totalHours || 0),
       });
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(projectRows), 'Projets_2025');
+      addWorksheet('Projets_2025', projectRows);
 
       const benchTypeRows = (benchDetails?.issueTypeTotals || []).map((entry) => ({
         Type: entry.issueType,
         Heures: Number(entry.hours || 0),
       }));
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.json_to_sheet(benchTypeRows.length ? benchTypeRows : [{ Type: 'Aucune donnée', Heures: 0 }]),
-        'Bench_Types'
-      );
+      addWorksheet('Bench_Types', benchTypeRows);
 
       const benchIssueRows = (benchDetails?.issues || []).map((issue) => ({
         Ticket: issue.issueKey,
         Type: issue.issueType,
         Parent: issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '',
-        Resume: issue.summary,
+        Résumé: issue.summary,
         Heures: Number(issue.hours || 0),
       }));
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.json_to_sheet(benchIssueRows.length ? benchIssueRows : [{ Ticket: 'Aucune donnée' }]),
-        'Bench_Tickets'
-      );
+      addWorksheet('Bench_Tickets', benchIssueRows);
 
       const leavesTypeRows = (leavesDetails.issueTypeTotals || []).map((entry) => ({
         Type: entry.issueType,
         Heures: Number(entry.hours || 0),
       }));
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.json_to_sheet(leavesTypeRows.length ? leavesTypeRows : [{ Type: 'Aucune donnée', Heures: 0 }]),
-        'Conges_Types'
-      );
+      addWorksheet('Congés_Types', leavesTypeRows);
 
       const leavesRows = (leaves.issues || []).map((issue) => ({
         Ticket: issue.issueKey,
         Type: issue.issueType,
         Statut: issue.status,
         Parent: issue.parentKey || '',
-        Resume: issue.summary,
+        Résumé: issue.summary,
         Heures: Number(issue.hours || 0),
         Jours: Number(issue.days || 0),
       }));
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.json_to_sheet(leavesRows.length ? leavesRows : [{ Ticket: 'Aucune donnée' }]),
-        'Conges_Tickets'
-      );
+      addWorksheet('Congés_Tickets', leavesRows);
 
       const safeDate = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(workbook, `jira-worklog-cse-${safeDate}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob(
+        [buffer],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+      );
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `jira-worklog-cse-${safeDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+
       addToast('✅ Fichier Excel exporté avec succès.', 'success');
     } catch (err) {
       addToast(err.message || "❌ Impossible d'exporter le fichier Excel.", 'error');
@@ -469,9 +514,9 @@ export default function App() {
     if (step === 0) {
       return (
         <section className="glass step-card reveal">
-          <h2>🔑 Étape 1 : créer votre clé d accès Jira</h2>
+          <h2>🔑 Étape 1 : créer votre clé d'accès Jira</h2>
           <p>
-            Cliquez sur le bouton ci-dessous, créez une clé d accès personnelle,
+            Cliquez sur le bouton ci-dessous, créez une clé d'accès personnelle,
             puis revenez ici pour la coller.
           </p>
           <a className="neon-btn" href={PAT_URL} target="_blank" rel="noreferrer">
@@ -488,7 +533,7 @@ export default function App() {
           <h2>📘 Étape 2 : lire le guide Codex</h2>
           <p>
             Ouvrez le guide interne et suivez les prérequis.
-            Quand c est fait, passez à l étape suivante.
+            Quand c'est fait, passez à l'étape suivante.
           </p>
           <a className="neon-btn secondary" href={CODEX_GUIDE_URL} target="_blank" rel="noreferrer">
             Ouvrir le guide
@@ -501,7 +546,7 @@ export default function App() {
       return (
         <section className="glass step-card reveal">
           <h2>⚙️ Étape 3 : lancer la configuration</h2>
-          <label htmlFor="pat-token">Collez votre clé d accès Jira</label>
+          <label htmlFor="pat-token">Collez votre clé d'accès Jira</label>
           <textarea
             id="pat-token"
             rows="4"
@@ -516,11 +561,12 @@ export default function App() {
             type="email"
             className="text-input"
             placeholder="prenom.nom@osf.digital"
+            autoComplete="email"
             value={targetEmail}
             onChange={(event) => setTargetEmail(event.target.value)}
           />
           <p className="hint">
-            Cas d usage: laissez vide pour vos propres données, ou saisissez un autre e-mail si votre PAT a les droits.
+            Cas d'usage : laissez vide pour vos propres données, ou saisissez un autre e-mail si votre PAT a les droits.
           </p>
 
           <div className="actions">
@@ -554,9 +600,9 @@ export default function App() {
           temps de travail par projet, puis congés et absences sur {LEAVES_SCOPE_LABEL}.
         </p>
         {targetEmail ? (
-          <p className="hint">Utilisateur ciblé: {targetEmail}</p>
+          <p className="hint">Utilisateur ciblé : {targetEmail}</p>
         ) : (
-          <p className="hint">Utilisateur ciblé: votre propre compte</p>
+          <p className="hint">Utilisateur ciblé : votre propre compte</p>
         )}
         <div className="actions">
           <button
@@ -572,7 +618,7 @@ export default function App() {
           </button>
         </div>
         {!connectionOk ? (
-          <p className="hint">Validez d abord la connexion à l étape 3.</p>
+          <p className="hint">Validez d'abord la connexion à l'étape 3.</p>
         ) : null}
       </section>
     );
@@ -580,13 +626,16 @@ export default function App() {
 
   return (
     <div className="page-wrap">
+      <a className="skip-link" href="#contenu-principal">
+        Aller au contenu principal
+      </a>
       <div className="bg-grid" aria-hidden="true" />
 
       <header className="hero glass reveal">
         <p className="badge">Jira Worklog CSE</p>
-        <h1>Un assistant simple et clair</h1>
+        <h1>Heures travaillées en 2025</h1>
         <p className="hero-sub">
-          Suivez les étapes pour connecter Jira, puis retrouver vos heures et vos congés 2025.
+          Suivez les étapes pour connecter Jira, puis consulter vos heures, congés et indicateurs 2025.
         </p>
         <p className="status">{headerStatus}</p>
       </header>
@@ -604,7 +653,14 @@ export default function App() {
             <strong>Progression de la collecte</strong>
             <span>{Math.round(reportProgress.value)}%</span>
           </div>
-          <div className="data-progress-track" aria-hidden="true">
+          <div
+            className="data-progress-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(clampPercent(reportProgress.value))}
+            aria-label="Progression du chargement des données"
+          >
             <span style={{ width: `${clampPercent(reportProgress.value)}%` }} />
           </div>
           <p>{reportProgress.label}</p>
@@ -628,7 +684,7 @@ export default function App() {
         ))}
       </aside>
 
-      <main className="wizard-wrap">
+      <main id="contenu-principal" className="wizard-wrap" tabIndex="-1" aria-busy={isBusy}>
         <section className="glass stepper reveal">
           <p className="step-count">
             Étape {step + 1} / {STEPS.length}
@@ -636,7 +692,16 @@ export default function App() {
           <ol>
             {STEPS.map((item, index) => (
               <li key={item.id} className={index === step ? 'active' : index < step ? 'done' : ''}>
-                <button type="button" disabled={isBusy} onClick={() => setStep(index)}>
+                <button
+                  ref={(el) => {
+                    stepButtonRefs.current[index] = el;
+                  }}
+                  type="button"
+                  disabled={isBusy}
+                  aria-current={index === step ? 'step' : undefined}
+                  onClick={() => setStep(index)}
+                  onKeyDown={(event) => handleStepKeyDown(event, index)}
+                >
                   <span>{index + 1}</span>
                   <strong>{item.title}</strong>
                 </button>
@@ -694,7 +759,7 @@ export default function App() {
                 <article className="summary-card">
                   <h4>✅ Taux d'utilisation</h4>
                   <p>{formatPercent(summary.utilizationRate)}</p>
-                  <small>Formule: 100 % - taux WAROE.</small>
+                  <small>Formule : 100 % - taux WAROE.</small>
                 </article>
               </div>
               <div className="actions">
@@ -722,9 +787,9 @@ export default function App() {
                   <table className="neon-table">
                     <thead>
                       <tr>
-                        <th>Projet</th>
-                        <th>Nom</th>
-                        <th>Heures</th>
+                        <th scope="col">Projet</th>
+                        <th scope="col">Nom</th>
+                        <th scope="col">Heures</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -772,8 +837,8 @@ export default function App() {
                         <table className="neon-table">
                           <thead>
                             <tr>
-                              <th>Type d'issue</th>
-                              <th>Heures</th>
+                              <th scope="col">Type d'issue</th>
+                              <th scope="col">Heures</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -796,10 +861,10 @@ export default function App() {
                         <table className="neon-table">
                           <thead>
                             <tr>
-                              <th>Ticket</th>
-                              <th>Type</th>
-                              <th>Parent</th>
-                              <th>Heures</th>
+                              <th scope="col">Ticket</th>
+                              <th scope="col">Type</th>
+                              <th scope="col">Parent</th>
+                              <th scope="col">Heures</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -831,10 +896,10 @@ export default function App() {
                       <table className="neon-table">
                         <thead>
                           <tr>
-                            <th>Ticket</th>
-                            <th>Type</th>
-                            <th>Parent</th>
-                            <th>Heures</th>
+                            <th scope="col">Ticket</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Parent</th>
+                            <th scope="col">Heures</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -876,7 +941,7 @@ export default function App() {
                   </div>
                   {leaves?.discovery?.usedFallbackScope ? (
                     <p className="hint">
-                      Certains filtres Jira n étaient pas disponibles. Un mode de secours a été utilisé.
+                      Certains filtres Jira n'étaient pas disponibles. Un mode de secours a été utilisé.
                     </p>
                   ) : null}
 
@@ -889,8 +954,8 @@ export default function App() {
                         <table className="neon-table">
                           <thead>
                             <tr>
-                              <th>Type d'issue</th>
-                              <th>Heures</th>
+                              <th scope="col">Type d'issue</th>
+                              <th scope="col">Heures</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -917,11 +982,11 @@ export default function App() {
                           <table className="neon-table">
                             <thead>
                               <tr>
-                                <th>Ticket</th>
-                                <th>Type</th>
-                                <th>Parent</th>
-                                <th>Heures</th>
-                                <th>Jours</th>
+                                <th scope="col">Ticket</th>
+                                <th scope="col">Type</th>
+                                <th scope="col">Parent</th>
+                                <th scope="col">Heures</th>
+                                <th scope="col">Jours</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -951,12 +1016,12 @@ export default function App() {
                   <table className="neon-table">
                     <thead>
                       <tr>
-                        <th>Ticket</th>
-                        <th>Type</th>
-                        <th>Statut</th>
-                        <th>Parent</th>
-                        <th>Heures</th>
-                        <th>Jours</th>
+                        <th scope="col">Ticket</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Statut</th>
+                        <th scope="col">Parent</th>
+                        <th scope="col">Heures</th>
+                        <th scope="col">Jours</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -993,11 +1058,11 @@ export default function App() {
         </p>
         <p>
           Il a été pensé pour celles et ceux qui tiennent la barre quand le vent change, pour
-          alléger les heures, remettre un peu d air, et laisser une trace utile sur la route.
+          alléger les heures, remettre un peu d'air, et laisser une trace utile sur la route.
         </p>
         <p>
           Si ce compagnon vous rend service, vous pouvez lui offrir un café pour continuer
-          l aventure en douceur.
+          l'aventure en douceur.
         </p>
         <a className="neon-btn secondary" href={KOFI_URL} target="_blank" rel="noreferrer">
           Ouvrir la page Ko-fi

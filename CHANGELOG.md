@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-03-13 12:28 CET
+
+### Changed
+
+- Fixed all `npm audit` vulnerabilities by upgrading Vite/plugin-react and replacing `xlsx` with `exceljs`.
+- Kept Excel export feature with a new browser-safe writer (`exceljs`) and styled worksheet headers.
+
+## [1.14.0] - 2026-03-13 12:26 CET
+
+### Changed
+
+- Replaced the hero title with a simpler French wording focused on 2025 worked hours.
+- Improved accessibility UX: visible focus states, skip link, stronger spacing, keyboard step navigation (arrows/home/end), progressbar semantics, and reduced-motion support.
+- Normalized French copy accents/apostrophes in UI and API messages.
+- Added SSR baseline for production build/start: server-side render with hydration fallback.
+
 ## [1.13.0] - 2026-03-13 12:19 CET
 
 ### Added

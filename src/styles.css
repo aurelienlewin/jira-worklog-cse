@@ -29,13 +29,37 @@ body,
   font-family: 'Nunito', 'Avenir Next', 'Trebuchet MS', sans-serif;
   background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 38%, var(--sky-bottom) 62%, var(--grass-light) 100%);
   color: var(--text);
+  line-height: 1.45;
 }
 
 .page-wrap {
   position: relative;
   min-height: 100vh;
-  padding: 28px;
+  padding: 32px;
   overflow-x: hidden;
+}
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -48px;
+  z-index: 200;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #20311c;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  top: 12px;
+}
+
+:focus-visible {
+  outline: 3px solid #2f5f39;
+  outline-offset: 2px;
 }
 
 .bg-grid {
@@ -68,7 +92,7 @@ body,
 .hero {
   max-width: 980px;
   margin: 0 auto 16px;
-  padding: 26px;
+  padding: 28px;
   border-radius: 20px;
   background: linear-gradient(
     145deg,
@@ -303,6 +327,11 @@ body,
   background: rgba(255, 255, 255, 0.82);
 }
 
+.stepper li button:focus-visible {
+  border-color: #365f3b;
+  box-shadow: 0 0 0 3px rgba(93, 140, 90, 0.28);
+}
+
 .stepper li button span {
   width: 24px;
   height: 24px;
@@ -514,6 +543,10 @@ label {
   filter: saturate(1.04);
 }
 
+.neon-btn:focus-visible {
+  box-shadow: 0 0 0 3px rgba(93, 140, 90, 0.28);
+}
+
 .neon-btn:disabled {
   opacity: 0.48;
   cursor: not-allowed;
@@ -610,6 +643,10 @@ label {
   font-weight: 700;
 }
 
+.neon-table a:focus-visible {
+  border-radius: 6px;
+}
+
 .total-row td {
   font-weight: 700;
   color: #587443;
@@ -636,6 +673,14 @@ label {
 .support-footer p {
   margin: 0 0 8px;
   color: #5a7550;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .reveal {
