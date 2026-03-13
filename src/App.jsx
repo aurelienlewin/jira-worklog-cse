@@ -8,6 +8,11 @@ const ISSUE_BROWSE_BASE_URL = String(import.meta.env.VITE_ISSUE_BROWSE_BASE_URL 
 
 const TOKEN_SESSION_KEY = 'worklog_cse_token';
 const USER_EMAIL_SESSION_KEY = 'worklog_cse_user_email';
+const SESSION_CONNECTION_KEY = 'worklog_cse_connection';
+const SESSION_REPORT_KEY = 'worklog_cse_report';
+const SESSION_LEAVES_KEY = 'worklog_cse_leaves';
+const SESSION_DATA_CONTEXT_KEY = 'worklog_cse_data_context';
+const SESSION_DATA_CACHE_VERSION = 1;
 const LEAVE_ANCHOR_ISSUE_KEY = String(import.meta.env.VITE_LEAVE_ANCHOR_ISSUE_KEY || 'ABS-1')
   .trim()
   .toUpperCase();
@@ -74,6 +79,52 @@ function writeStoredValue(key, rawValue) {
   } catch {
     // Ignore storage access errors.
   }
+}
+
+function readSessionJson(key) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionJson(key, value) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (value === undefined || value === null) {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
+function clearSessionDataCache() {
+  writeSessionJson(SESSION_CONNECTION_KEY, null);
+  writeSessionJson(SESSION_REPORT_KEY, null);
+  writeSessionJson(SESSION_LEAVES_KEY, null);
+  writeSessionJson(SESSION_DATA_CONTEXT_KEY, null);
+}
+
+function hashString(value) {
+  let hash = 0;
+  const source = String(value || '');
+  for (let i = 0; i < source.length; i += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(16);
+}
+
+function buildDataContextKey(tokenValue, userEmailValue) {
+  const tokenPart = hashString(String(tokenValue || '').trim());
+  const emailPart = String(userEmailValue || '').trim().toLowerCase();
+  return `${tokenPart}:${emailPart}`;
 }
 
 function formatNumber(value) {
@@ -266,6 +317,7 @@ export default function App() {
   const connectionResultRef = useRef(null);
   const summarySectionRef = useRef(null);
   const activeRequestControllerRef = useRef(null);
+  const dataContextRef = useRef('');
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -644,6 +696,15 @@ export default function App() {
 
       setReport(hoursData);
       setLeaves(leavesData);
+      const contextKey = buildDataContextKey(activeToken, activeUserEmail);
+      dataContextRef.current = contextKey;
+      writeSessionJson(SESSION_DATA_CONTEXT_KEY, {
+        version: SESSION_DATA_CACHE_VERSION,
+        key: contextKey,
+        savedAt: Date.now(),
+      });
+      writeSessionJson(SESSION_REPORT_KEY, hoursData);
+      writeSessionJson(SESSION_LEAVES_KEY, leavesData);
       setReportProgress({ active: true, value: 100, label: 'Données prêtes.' });
       const userLabel = leavesData?.user?.resolvedEmail || hoursData?.user?.resolvedEmail || activeUserEmail || '';
       if (userLabel) {
@@ -701,6 +762,7 @@ export default function App() {
       });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
+      writeSessionJson(SESSION_CONNECTION_KEY, data.handshake || null);
       if (data.handshake?.ok) {
         addToast('✅ Configuration terminée avec succès.', 'success');
         goToStep(3, { force: true });
@@ -724,6 +786,8 @@ export default function App() {
 
   async function runCheck(tokenOverride, options = {}) {
     const activeToken = String(tokenOverride || token || '').trim();
+    const requestedUserEmail = String(options.userEmail ?? targetEmail ?? '').trim();
+    const contextKey = buildDataContextKey(activeToken, requestedUserEmail);
     if (!activeToken) {
       addToast("⚠️ Aucune clé d'accès trouvée pour vérifier la connexion.", 'error');
       return;
@@ -739,12 +803,16 @@ export default function App() {
       });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
+      writeSessionJson(SESSION_CONNECTION_KEY, data.handshake || null);
 
       if (data.handshake?.ok) {
         goToStep(3, { force: true });
         addToast('✅ Connexion validée. Ouverture de la vue des heures.', 'success');
-        if (!options.skipDataLoad) {
-          await loadYearlyData(activeToken, { userEmail: options.userEmail, signal: controller.signal });
+        const shouldLoadData = options.forceDataLoad === true || dataContextRef.current !== contextKey;
+        if (!options.skipDataLoad && shouldLoadData) {
+          await loadYearlyData(activeToken, { userEmail: requestedUserEmail, signal: controller.signal });
+        } else if (!options.skipDataLoad && !shouldLoadData) {
+          addToast('ℹ️ Données déjà disponibles dans la session. Rafraîchissez manuellement si besoin.', 'info');
         }
       } else {
         goToStep(2);
@@ -768,7 +836,38 @@ export default function App() {
 
     setToken(savedToken);
     addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
-    runCheck(savedToken, { userEmail: savedUserEmail });
+    const contextKey = buildDataContextKey(savedToken, savedUserEmail);
+    const cachedContext = readSessionJson(SESSION_DATA_CONTEXT_KEY);
+    const contextMatches =
+      cachedContext?.version === SESSION_DATA_CACHE_VERSION &&
+      cachedContext?.key === contextKey;
+    const cachedConnection = contextMatches ? readSessionJson(SESSION_CONNECTION_KEY) : null;
+    const cachedReport = contextMatches ? readSessionJson(SESSION_REPORT_KEY) : null;
+    const cachedLeaves = contextMatches ? readSessionJson(SESSION_LEAVES_KEY) : null;
+
+    if (contextMatches) {
+      dataContextRef.current = contextKey;
+    }
+
+    if (cachedConnection) {
+      setConnection(cachedConnection);
+    }
+
+    if (cachedReport && cachedLeaves) {
+      setReport(cachedReport);
+      setLeaves(cachedLeaves);
+      goToStep(3, { force: true });
+      addToast('ℹ️ Données restaurées depuis la session (pas de nouvelle collecte).', 'info');
+      return;
+    }
+
+    if (cachedConnection?.ok) {
+      goToStep(3, { force: true });
+      addToast('ℹ️ Session restaurée. Rafraîchissez manuellement les données si nécessaire.', 'info');
+      return;
+    }
+
+    goToStep(2, { force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -779,6 +878,15 @@ export default function App() {
   useEffect(() => {
     writeStoredValue(USER_EMAIL_SESSION_KEY, targetEmail);
   }, [targetEmail]);
+
+  useEffect(() => {
+    if (!token) return;
+    const currentContext = buildDataContextKey(token, targetEmail);
+    if (dataContextRef.current && dataContextRef.current !== currentContext) {
+      setReport(null);
+      setLeaves(null);
+    }
+  }, [token, targetEmail]);
 
   useEffect(() => {
     setBenchSubtasksVisibleCount(TABLE_PAGE_SIZE);
@@ -849,8 +957,10 @@ export default function App() {
     setConnection(null);
     setReport(null);
     setLeaves(null);
+    dataContextRef.current = '';
     writeStoredValue(TOKEN_SESSION_KEY, '');
     writeStoredValue(USER_EMAIL_SESSION_KEY, '');
+    clearSessionDataCache();
     goToStep(0, { force: true });
     addToast(
       wasBusy

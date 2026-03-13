@@ -80,6 +80,8 @@ Notes:
 
 - l'API charge `.env` puis `.env.local` au démarrage (`.env.local` est prioritaire),
 - si `ISSUE_TRACKER_URL` reste sur une valeur placeholder (`example.com`), l'API bloque les appels avec un message de configuration explicite.
+- les données (connexion + rapports) sont restaurées depuis la session navigateur, sans collecte automatique au rechargement de page,
+- une nouvelle collecte est faite uniquement après changement de clé/utilisateur (vérification) ou via le bouton manuel de rafraîchissement.
 
 ## Scripts
 
