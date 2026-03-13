@@ -364,7 +364,7 @@ export default function App() {
       setConnection(data.handshake || null);
       if (data.handshake?.ok) {
         addToast('✅ Configuration terminée avec succès.', 'success');
-        setStep(3);
+        goToStep(3);
         await loadYearlyData(activeToken);
       } else {
         addToast('⚠️ La configuration est terminée, mais la connexion reste à corriger.', 'warn');
@@ -390,17 +390,17 @@ export default function App() {
       setConnection(data.handshake || null);
 
       if (data.handshake?.ok) {
-        setStep(3);
+        goToStep(3);
         addToast('✅ Connexion validée. Ouverture de la vue des heures.', 'success');
         if (!options.skipDataLoad) {
           await loadYearlyData(activeToken);
         }
       } else {
-        setStep(2);
+        goToStep(2);
         addToast("⚠️ Connexion non validée. Revenez à l'étape 3.", 'warn');
       }
     } catch (err) {
-      setStep(2);
+      goToStep(2);
       addToast(err.message || '❌ Échec de la vérification.', 'error');
     } finally {
       setBusyAction('');
@@ -427,14 +427,20 @@ export default function App() {
     writeStoredValue(USER_EMAIL_SESSION_KEY, targetEmail);
   }, [targetEmail]);
 
+  function goToStep(nextStepIndex) {
+    if (step === nextStepIndex) return;
+    dismissAllToasts();
+    setStep(nextStepIndex);
+  }
+
   function nextStep() {
     if (!canGoNext) return;
-    setStep((prev) => prev + 1);
+    goToStep(step + 1);
   }
 
   function prevStep() {
     if (!canGoPrev) return;
-    setStep((prev) => prev - 1);
+    goToStep(step - 1);
   }
 
   function handleStepKeyDown(event, index) {
@@ -451,7 +457,7 @@ export default function App() {
 
     if (targetIndex === null) return;
     event.preventDefault();
-    setStep(targetIndex);
+    goToStep(targetIndex);
     stepButtonRefs.current[targetIndex]?.focus();
   }
 
@@ -463,7 +469,7 @@ export default function App() {
     setLeaves(null);
     writeStoredValue(TOKEN_SESSION_KEY, '');
     writeStoredValue(USER_EMAIL_SESSION_KEY, '');
-    setStep(0);
+    goToStep(0);
     addToast('ℹ️ Clé supprimée. Vous pouvez en saisir une nouvelle.', 'info');
   }
 
@@ -700,7 +706,7 @@ export default function App() {
           >
             {busyAction === 'report' ? 'Chargement...' : 'Charger / rafraîchir mes données 2025'}
           </button>
-          <button type="button" className="neon-btn ghost" onClick={() => setStep(2)} disabled={isBusy}>
+          <button type="button" className="neon-btn ghost" onClick={() => goToStep(2)} disabled={isBusy}>
             Revenir pour modifier ma clé
           </button>
         </div>
@@ -786,7 +792,7 @@ export default function App() {
                   type="button"
                   disabled={isBusy}
                   aria-current={index === step ? 'step' : undefined}
-                  onClick={() => setStep(index)}
+                  onClick={() => goToStep(index)}
                   onKeyDown={(event) => handleStepKeyDown(event, index)}
                 >
                   <span>{index + 1}</span>

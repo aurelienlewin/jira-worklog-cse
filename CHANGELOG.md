@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.3] - 2026-03-13 12:45 CET
+
+### Changed
+
+- Toasts from previous steps are now cleared automatically on every step change (manual navigation and automatic redirections after checks/setup).
+
 ## [1.16.2] - 2026-03-13 12:43 CET
 
 ### Fixed
