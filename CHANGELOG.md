@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.9] - 2026-03-13 13:17 CET
+
+### Changed
+
+- Upgraded collapsible sections UX: explicit open/closed indicator, visible line-count badges, clearer interactive header area, and improved keyboard focus styling.
+- Improved spacing/margins inside collapsible content blocks for better readability and less visual crowding.
+
 ## [1.16.8] - 2026-03-13 13:15 CET
 
 ### Fixed
