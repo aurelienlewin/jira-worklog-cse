@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.8] - 2026-03-13 13:15 CET
+
+### Fixed
+
+- Fixed transient frontend JSON parsing crash (`Unexpected end of JSON input`) by replacing `response.json()` with safe text parsing + guarded JSON decode.
+- Added automatic retries with backoff and toast feedback for report loading, MCP setup, and connection checks.
+
 ## [1.16.7] - 2026-03-13 13:12 CET
 
 ### Changed

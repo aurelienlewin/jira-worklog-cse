@@ -26,6 +26,8 @@ const ACTION_LABELS = {
   report: '📥 Chargement des heures et des congés en cours...',
 };
 const TABLE_PAGE_SIZE = 60;
+const API_RETRY_ATTEMPTS = 3;
+const API_RETRY_DELAY_MS = 900;
 
 function readStoredValue(key) {
   if (typeof window === 'undefined') return '';
@@ -93,6 +95,10 @@ function clampPercent(value) {
 function nextChunkSize(visible, total) {
   const remaining = Math.max(0, total - visible);
   return Math.min(TABLE_PAGE_SIZE, remaining);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
@@ -317,9 +323,46 @@ export default function App() {
       throw new Error("Impossible de joindre le serveur local. Vérifiez que l'application tourne avec `npm run dev`.");
     }
 
-    const data = await response.json();
+    const rawText = await response.text();
+    let data = {};
+    if (rawText) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        if (response.ok) {
+          throw new Error('Le serveur a répondu dans un format temporairement invalide. Nouvel essai recommandé.');
+        }
+        throw new Error(`Le serveur a renvoyé une réponse invalide (${response.status}).`);
+      }
+    }
+
     if (!response.ok) throw new Error(data.error || 'Une erreur est survenue.');
     return data;
+  }
+
+  async function postJsonWithRetry(url, payload, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts || API_RETRY_ATTEMPTS));
+    const label = String(options.label || 'Requête');
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const data = await postJson(url, payload);
+        if (attempt > 1) {
+          addToast(`✅ ${label} réussie après ${attempt} tentatives.`, 'success');
+        }
+        return data;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Erreur inconnue';
+        lastError = new Error(message);
+        if (attempt >= attempts) break;
+
+        addToast(`⚠️ ${label}: tentative ${attempt}/${attempts} en échec. Nouvelle tentative...`, 'warn');
+        await sleep(API_RETRY_DELAY_MS * attempt);
+      }
+    }
+
+    throw lastError || new Error('Une erreur est survenue.');
   }
 
   async function loadYearlyData(tokenOverride) {
@@ -334,18 +377,18 @@ export default function App() {
     setReportProgress({ active: true, value: 6, label: 'Connexion à Jira en cours...' });
     try {
       setReportProgress({ active: true, value: 22, label: 'Collecte des heures travaillées 2025...' });
-      const hoursData = await postJson('/api/jira/report', {
+      const hoursData = await postJsonWithRetry('/api/jira/report', {
         token: activeToken,
         detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
         userEmail: activeUserEmail || undefined,
-      });
+      }, { label: 'Chargement des heures 2025', attempts: 3 });
 
       setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVES_SCOPE_LABEL}...` });
-      const leavesData = await postJson('/api/jira/leaves', {
+      const leavesData = await postJsonWithRetry('/api/jira/leaves', {
         token: activeToken,
         issueKey: LEAVES_ISSUE_KEY,
         userEmail: activeUserEmail || undefined,
-      });
+      }, { label: 'Chargement des congés et absences 2025', attempts: 3 });
 
       setReportProgress({ active: true, value: 91, label: 'Calcul des indicateurs en cours...' });
 
@@ -393,7 +436,10 @@ export default function App() {
 
     setBusyAction('setup');
     try {
-      const data = await postJson('/api/mcp/setup', { token: activeToken });
+      const data = await postJsonWithRetry('/api/mcp/setup', { token: activeToken }, {
+        label: 'Configuration MCP',
+        attempts: 2,
+      });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
       if (data.handshake?.ok) {
@@ -419,7 +465,10 @@ export default function App() {
 
     setBusyAction('check');
     try {
-      const data = await postJson('/api/mcp/check', { token: activeToken });
+      const data = await postJsonWithRetry('/api/mcp/check', { token: activeToken }, {
+        label: 'Vérification de connexion',
+        attempts: 3,
+      });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
 
