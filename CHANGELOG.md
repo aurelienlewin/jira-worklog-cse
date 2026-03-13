@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-03-13 12:43 CET
+
+### Fixed
+
+- Fixed key/email persistence by storing values in both `localStorage` and `sessionStorage` (read priority to local), so reopening the browser no longer forces re-entry.
+- Added safe storage guards for restricted browser contexts to avoid silent restore failures.
+
 ## [1.16.1] - 2026-03-13 12:41 CET
 
 ### Fixed

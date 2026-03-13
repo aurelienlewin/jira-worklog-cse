@@ -26,6 +26,42 @@ const ACTION_LABELS = {
   report: '📥 Chargement des heures et des congés en cours...',
 };
 
+function readStoredValue(key) {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    const localValue = window.localStorage.getItem(key);
+    if (localValue) return localValue;
+  } catch {
+    // Ignore storage access errors.
+  }
+
+  try {
+    return window.sessionStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeStoredValue(key, rawValue) {
+  if (typeof window === 'undefined') return;
+  const value = String(rawValue || '').trim();
+
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage access errors.
+  }
+
+  try {
+    if (value) window.sessionStorage.setItem(key, value);
+    else window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('fr-FR', {
     minimumFractionDigits: 2,
@@ -372,8 +408,8 @@ export default function App() {
   }
 
   useEffect(() => {
-    const savedToken = sessionStorage.getItem(TOKEN_SESSION_KEY) || '';
-    const savedUserEmail = sessionStorage.getItem(USER_EMAIL_SESSION_KEY) || '';
+    const savedToken = readStoredValue(TOKEN_SESSION_KEY);
+    const savedUserEmail = readStoredValue(USER_EMAIL_SESSION_KEY);
     setTargetEmail(savedUserEmail);
     if (!savedToken) return;
 
@@ -384,21 +420,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const value = String(token || '').trim();
-    if (!value) {
-      sessionStorage.removeItem(TOKEN_SESSION_KEY);
-      return;
-    }
-    sessionStorage.setItem(TOKEN_SESSION_KEY, value);
+    writeStoredValue(TOKEN_SESSION_KEY, token);
   }, [token]);
 
   useEffect(() => {
-    const value = String(targetEmail || '').trim();
-    if (!value) {
-      sessionStorage.removeItem(USER_EMAIL_SESSION_KEY);
-      return;
-    }
-    sessionStorage.setItem(USER_EMAIL_SESSION_KEY, value);
+    writeStoredValue(USER_EMAIL_SESSION_KEY, targetEmail);
   }, [targetEmail]);
 
   function nextStep() {
@@ -435,8 +461,8 @@ export default function App() {
     setConnection(null);
     setReport(null);
     setLeaves(null);
-    sessionStorage.removeItem(TOKEN_SESSION_KEY);
-    sessionStorage.removeItem(USER_EMAIL_SESSION_KEY);
+    writeStoredValue(TOKEN_SESSION_KEY, '');
+    writeStoredValue(USER_EMAIL_SESSION_KEY, '');
     setStep(0);
     addToast('ℹ️ Clé supprimée. Vous pouvez en saisir une nouvelle.', 'info');
   }
