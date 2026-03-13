@@ -83,6 +83,8 @@ const LEAVE_ANCHOR_ISSUE_KEY = String(process.env.LEAVE_ANCHOR_ISSUE_KEY || 'ABS
 const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const MAX_COMMENT_SAMPLES_PER_PROJECT = Number(process.env.MAX_COMMENT_SAMPLES_PER_PROJECT || 120);
 const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 45000);
+const AVATAR_FETCH_TIMEOUT_MS = Number(process.env.AVATAR_FETCH_TIMEOUT_MS || 8000);
+const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 256 * 1024);
 const BENCH_SCOPE_KEY = String(process.env.BENCH_SCOPE_KEY || 'BENCH').trim().toUpperCase();
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
@@ -93,6 +95,7 @@ const MCP_TOOLSETS = String(process.env.MCP_TOOLSETS || `default,${LEGACY_AGILE_
 const MCP_URL_ENV_KEY = String(process.env.MCP_URL_ENV_KEY || LEGACY_URL_ENV_KEY).trim();
 const MCP_TOKEN_ENV_KEY = String(process.env.MCP_TOKEN_ENV_KEY || LEGACY_TOKEN_ENV_KEY).trim();
 const MCP_TIMEOUT_ENV_KEY = String(process.env.MCP_TIMEOUT_ENV_KEY || LEGACY_TIMEOUT_ENV_KEY).trim();
+const MCP_PROTOCOL_VERSION = String(process.env.MCP_PROTOCOL_VERSION || '2025-06-18').trim();
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SERVER_DIR, '..');
 const CLIENT_DIST_DIR = path.join(ROOT_DIR, 'dist');
@@ -317,10 +320,14 @@ async function runMcpHandshake(token) {
     const startedAt = Date.now();
     let stderr = '';
     let initOk = false;
+    let done = false;
+    let negotiatedProtocolVersion = '';
 
     const rl = readline.createInterface({ input: child.stdout });
 
     const cleanup = (result) => {
+      if (done) return;
+      done = true;
       try {
         rl.close();
       } catch {}
@@ -351,15 +358,50 @@ async function runMcpHandshake(token) {
       });
     });
 
+    child.on('exit', (code, signal) => {
+      if (done) return;
+      clearTimeout(timeout);
+      cleanup({
+        ok: false,
+        initSeconds: null,
+        message: `Processus MCP terminé prématurément (code=${code ?? 'null'}, signal=${signal || 'none'}).`,
+        stderr: stderr.slice(-1000),
+      });
+    });
+
     rl.on('line', (line) => {
       const msg = parseJsonLine(line);
       if (!msg) return;
 
+      if (msg.id === 1 && msg.error && !initOk) {
+        clearTimeout(timeout);
+        const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+        cleanup({
+          ok: false,
+          initSeconds,
+          message: `Échec MCP initialize: ${msg.error?.message || 'erreur inconnue'}`,
+          stderr: stderr.slice(-1000),
+        });
+        return;
+      }
+
       if (msg.id === 1 && msg.result && !initOk) {
         initOk = true;
-        const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+        negotiatedProtocolVersion = String(msg.result?.protocolVersion || '').trim();
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`);
+        return;
+      }
+
+      if (msg.id === 2 && msg.error) {
+        clearTimeout(timeout);
+        const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+        cleanup({
+          ok: false,
+          initSeconds,
+          message: `Échec MCP tools/list: ${msg.error?.message || 'erreur inconnue'}`,
+          stderr: stderr.slice(-1000),
+        });
         return;
       }
 
@@ -367,10 +409,13 @@ async function runMcpHandshake(token) {
         clearTimeout(timeout);
         const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
         const toolCount = Array.isArray(msg.result?.tools) ? msg.result.tools.length : 0;
+        const protocolLabel = negotiatedProtocolVersion
+          ? ` | protocole ${negotiatedProtocolVersion}`
+          : '';
         cleanup({
           ok: initOk,
           initSeconds,
-          message: `Fonctions disponibles: ${toolCount}`,
+          message: `Fonctions disponibles: ${toolCount}${protocolLabel}`,
           stderr: stderr.slice(-1000),
         });
       }
@@ -382,7 +427,7 @@ async function runMcpHandshake(token) {
         id: 1,
         method: 'initialize',
         params: {
-          protocolVersion: '2025-06-18',
+          protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: { name: 'neon-webapp', version: '1.0.0' },
         },
@@ -543,17 +588,101 @@ function normalizeIdentity(value) {
 function normalizeAvatarUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
+  if (/^data:image\//i.test(raw)) return raw;
   if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('//')) return `https:${raw}`;
   if (raw.startsWith('/')) return `${TRACKER_URL}${raw}`;
-  return raw;
+  try {
+    return new URL(raw, `${TRACKER_URL}/`).toString();
+  } catch {
+    return raw;
+  }
+}
+
+function avatarSizeScore(key) {
+  const match = String(key || '').match(/(\d+)\s*x\s*(\d+)/i);
+  if (!match) return 0;
+  return Number(match[1] || 0) * Number(match[2] || 0);
+}
+
+function extractAvatarCandidates(user) {
+  if (!user || typeof user !== 'object') return [];
+  const avatars = user.avatarUrls && typeof user.avatarUrls === 'object'
+    ? user.avatarUrls
+    : {};
+  const avatarEntries = Object.entries(avatars)
+    .sort((left, right) => avatarSizeScore(right[0]) - avatarSizeScore(left[0]))
+    .map(([, value]) => normalizeAvatarUrl(value));
+  return uniqueNonEmpty([
+    ...avatarEntries,
+    normalizeAvatarUrl(user.avatarUrl),
+  ]);
+}
+
+async function fetchAvatarAsDataUrl(token, url) {
+  const source = normalizeAvatarUrl(url);
+  if (!/^https?:\/\//i.test(source)) return '';
+  const timeoutMs = Math.max(1200, AVATAR_FETCH_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = { Accept: 'image/*' };
+
+  try {
+    const sourceUrl = new URL(source);
+    const trackerOrigin = new URL(TRACKER_URL).origin;
+    if (sourceUrl.origin === trackerOrigin) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  } catch {
+    // Keep anonymous fetch for malformed URLs.
+  }
+
+  try {
+    const response = await fetch(source, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers,
+    });
+    if (!response.ok) return '';
+
+    const contentType = String(response.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (!contentType.startsWith('image/')) return '';
+
+    const lengthHeader = Number(response.headers.get('content-length') || 0);
+    if (Number.isFinite(lengthHeader) && lengthHeader > AVATAR_MAX_BYTES) return '';
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.byteLength || bytes.byteLength > AVATAR_MAX_BYTES) return '';
+
+    return `data:${contentType};base64,${Buffer.from(bytes).toString('base64')}`;
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveUserAvatar(token, user) {
+  const candidates = extractAvatarCandidates(user);
+  const avatarUrl = candidates[0] || null;
+
+  for (const candidate of candidates) {
+    const avatarDataUrl = await fetchAvatarAsDataUrl(token, candidate);
+    if (avatarDataUrl) {
+      return { avatarUrl, avatarDataUrl };
+    }
+  }
+
+  return { avatarUrl, avatarDataUrl: null };
 }
 
 function extractUserAvatarUrl(user) {
-  if (!user || typeof user !== 'object') return null;
-  const avatars = user.avatarUrls || {};
-  const candidate = avatars['48x48'] || avatars['32x32'] || avatars['24x24'] || avatars['16x16'] || user.avatarUrl || '';
-  const normalized = normalizeAvatarUrl(candidate);
-  return normalized || null;
+  const candidates = extractAvatarCandidates(user);
+  return candidates[0] || null;
 }
 
 function normalizeTextForMatch(value) {
@@ -884,7 +1013,11 @@ function uniqueNonEmpty(values) {
 async function searchUsersSafe(token, endpoint) {
   try {
     const users = await trackerFetchJson(token, endpoint);
-    return Array.isArray(users) ? users : [];
+    if (Array.isArray(users)) return users;
+    if (Array.isArray(users?.users)) return users.users;
+    if (Array.isArray(users?.values)) return users.values;
+    if (users && typeof users === 'object' && users.accountId) return [users];
+    return [];
   } catch {
     return [];
   }
@@ -905,17 +1038,27 @@ function dedupeUsers(users) {
 }
 
 async function findUsersByEmail(token, email) {
-  const encoded = encodeURIComponent(email);
-  const allUsers = [];
+  const normalized = String(email || '').trim();
+  if (!normalized) return [];
+  const localPart = normalized.includes('@') ? normalized.split('@')[0] : '';
+  const searchQueries = uniqueNonEmpty([normalized, localPart]);
+  const searchEndpoints = [];
 
-  const queryEndpoints = makeApiPathCandidates(`user/search?query=${encoded}`);
-  for (const endpoint of queryEndpoints) {
-    const users = await searchUsersSafe(token, endpoint);
-    allUsers.push(...users);
+  for (const query of searchQueries) {
+    const encoded = encodeURIComponent(query);
+    searchEndpoints.push(
+      ...makeApiPathCandidates(`user/search?query=${encoded}`),
+      ...makeApiPathCandidates(`user/picker?query=${encoded}`),
+      ...makeApiPathCandidates(`user/search/query?query=${encoded}`),
+      ...makeApiPathCandidates(`user/search?username=${encoded}`)
+    );
   }
 
-  const usernameEndpoints = makeApiPathCandidates(`user/search?username=${encoded}`);
-  for (const endpoint of usernameEndpoints) {
+  const encodedIdentity = encodeURIComponent(normalized);
+  searchEndpoints.push(...makeApiPathCandidates(`user?accountId=${encodedIdentity}`));
+  const allUsers = [];
+
+  for (const endpoint of uniqueNonEmpty(searchEndpoints)) {
     const users = await searchUsersSafe(token, endpoint);
     allUsers.push(...users);
   }
@@ -1234,12 +1377,14 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
     delete project._commentEntries;
   }
 
+  const avatar = await resolveUserAvatar(token, userContext.targetUser);
   return {
     user: {
       mode: userContext.mode,
       requestedEmail: userContext.requestedEmail || null,
       resolvedEmail: userContext.targetUser?.emailAddress || null,
-      avatarUrl: extractUserAvatarUrl(userContext.targetUser),
+      avatarUrl: avatar.avatarUrl || extractUserAvatarUrl(userContext.targetUser),
+      avatarDataUrl: avatar.avatarDataUrl,
       displayName:
         userContext.targetUser?.displayName ||
         userContext.targetUser?.name ||
@@ -1369,12 +1514,14 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
   const totalHours = Number((totalSeconds / 3600).toFixed(2));
   const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
 
+  const avatar = await resolveUserAvatar(token, userContext.targetUser);
   return {
     user: {
       mode: userContext.mode,
       requestedEmail: userContext.requestedEmail || null,
       resolvedEmail: userContext.targetUser?.emailAddress || null,
-      avatarUrl: extractUserAvatarUrl(userContext.targetUser),
+      avatarUrl: avatar.avatarUrl || extractUserAvatarUrl(userContext.targetUser),
+      avatarDataUrl: avatar.avatarDataUrl,
       displayName:
         userContext.targetUser?.displayName ||
         userContext.targetUser?.name ||

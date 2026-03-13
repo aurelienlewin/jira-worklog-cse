@@ -15,10 +15,12 @@ Application locale (React + Node.js) pour visualiser simplement les heures 2025,
 - propose des détails (types d'issue, sous-tâches, tickets complets),
 - masque les sections "Sous-tâches" lorsqu'elles sont vides,
 - affiche l'avatar de l'utilisateur analysé (si disponible),
+- renforce la récupération de l'avatar (normalisation + fallback image embarquée),
 - résume les commentaires bench (avec Codex + fallback local),
 - permet d'interrompre une session restaurée et d'annuler les requêtes en cours,
 - exporte un `.xlsx` enrichi (synthèse visuelle),
-- propose un export PDF complet avec une mise en page proche de l'interface.
+- propose un export PDF complet avec une mise en page proche de l'interface,
+- ouvre une fenêtre d'impression PDF fiable (sans faux positif de popup bloquée).
 
 ## Parcours utilisateur
 
@@ -34,6 +36,7 @@ L'interface est en français, orientée non technique, avec:
 - toasts flottants cumulables et dismissables (erreurs persistantes jusqu'au clic),
 - navigation clavier,
 - focus visibles,
+- focus automatique cohérent pendant les progressions (collecte/configuration/vérification), puis redirection vers la section utile,
 - arrêt manuel de session (même pendant une collecte auto-restaurée),
 - rendu SSR en production.
 

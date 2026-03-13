@@ -4,6 +4,19 @@ Tous les changements notables de ce projet sont listés ici.
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-03-13 14:59 CET
+
+### Fixed
+
+- Export PDF: correction de l'ouverture `about:blank` sans contenu et suppression du faux message de blocage popup quand la fenêtre est bien autorisée.
+- Flux d'impression PDF: ouverture fiable de la fenêtre, rendu du document puis déclenchement d'impression depuis la fenêtre parente.
+- Avatar utilisateur: récupération durcie (normalisation URL, fallback image embarquée) pour éviter les échecs d'affichage côté navigateur.
+
+### Changed
+
+- Focus automatique: verrouillage logique sur la barre de progression pendant les étapes de configuration/vérification/collecte, puis bascule vers la section cible (résumé ou résultat de connexion).
+- Handshake MCP: messages d'erreur enrichis (initialize/tools/list), prise en charge des sorties prématurées et version de protocole configurable (`MCP_PROTOCOL_VERSION`).
+
 ## [1.17.0] - 2026-03-13 14:35 CET
 
 ### Changed

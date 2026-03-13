@@ -44,6 +44,13 @@ const API_RETRY_DELAY_MS = 900;
 const TOAST_TTL_MS = 6000;
 const TOAST_FADE_MS = 320;
 const FOCUS_SCROLL_MS = 150;
+const EMPTY_PROGRESS_STATE = {
+  active: false,
+  value: 0,
+  label: '',
+  title: '',
+  ariaLabel: '',
+};
 
 function readStoredValue(key) {
   if (typeof window === 'undefined') return '';
@@ -295,6 +302,10 @@ function AccountAvatar({ src, label }) {
   const [hasError, setHasError] = useState(false);
   const initials = getInitials(label);
 
+  useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
   if (!src || hasError) {
     return (
       <span className="account-avatar fallback" aria-hidden="true">
@@ -326,7 +337,8 @@ export default function App() {
   const [busyAction, setBusyAction] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
+  const [reportProgress, setReportProgress] = useState(EMPTY_PROGRESS_STATE);
+  const [postProgressFocusTarget, setPostProgressFocusTarget] = useState('');
   const [benchSubtasksVisibleCount, setBenchSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [benchIssuesVisibleCount, setBenchIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [leavesSubtasksVisibleCount, setLeavesSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
@@ -479,6 +491,8 @@ export default function App() {
       fromReport?.displayName ||
       '';
     const avatarUrl =
+      fromLeaves?.avatarDataUrl ||
+      fromReport?.avatarDataUrl ||
       fromLeaves?.avatarUrl ||
       fromReport?.avatarUrl ||
       '';
@@ -643,6 +657,26 @@ export default function App() {
     return index === 3 && !connectionOk;
   }
 
+  function startAutoProgressTicker(options = {}) {
+    if (typeof window === 'undefined') return () => {};
+    const maxValue = clampPercent(options.maxValue ?? 90);
+    const minStep = Math.max(0.3, Number(options.minStep || 0.9));
+    const maxStep = Math.max(minStep, Number(options.maxStep || 2.8));
+    const intervalMs = Math.max(240, Number(options.intervalMs || 700));
+    const timer = window.setInterval(() => {
+      setReportProgress((prev) => {
+        if (!prev.active) return prev;
+        if (Number(prev.value || 0) >= maxValue) return prev;
+        const step = minStep + Math.random() * (maxStep - minStep);
+        return {
+          ...prev,
+          value: Math.min(maxValue, Number(prev.value || 0) + step),
+        };
+      });
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }
+
   useEffect(() => {
     return () => {
       clearAllToastTimers();
@@ -721,23 +755,48 @@ export default function App() {
     }
 
     setBusyAction('report');
-    setReportProgress({ active: true, value: 6, label: 'Connexion au service en cours...' });
+    setPostProgressFocusTarget('');
+    setReportProgress({
+      active: true,
+      value: 6,
+      title: 'Progression de la collecte',
+      ariaLabel: 'Progression du chargement des données',
+      label: 'Connexion au service en cours...',
+    });
     try {
-      setReportProgress({ active: true, value: 22, label: 'Collecte des heures travaillées 2025...' });
+      setReportProgress({
+        active: true,
+        value: 22,
+        title: 'Progression de la collecte',
+        ariaLabel: 'Progression du chargement des données',
+        label: 'Collecte des heures travaillées 2025...',
+      });
       const hoursData = await postJsonWithRetry('/api/worklogs/report', {
         token: activeToken,
         detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
         userEmail: activeUserEmail || undefined,
       }, { label: 'Chargement des heures 2025', attempts: 3, signal });
 
-      setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVE_SCOPE_LABEL}...` });
+      setReportProgress({
+        active: true,
+        value: 64,
+        title: 'Progression de la collecte',
+        ariaLabel: 'Progression du chargement des données',
+        label: `Collecte des congés et absences ${LEAVE_SCOPE_LABEL}...`,
+      });
       const leavesData = await postJsonWithRetry('/api/worklogs/leaves', {
         token: activeToken,
         issueKey: LEAVE_ANCHOR_ISSUE_KEY,
         userEmail: activeUserEmail || undefined,
       }, { label: 'Chargement des congés et absences 2025', attempts: 3, signal });
 
-      setReportProgress({ active: true, value: 91, label: 'Calcul des indicateurs en cours...' });
+      setReportProgress({
+        active: true,
+        value: 91,
+        title: 'Progression de la collecte',
+        ariaLabel: 'Progression du chargement des données',
+        label: 'Calcul des indicateurs en cours...',
+      });
 
       setReport(hoursData);
       setLeaves(leavesData);
@@ -750,7 +809,14 @@ export default function App() {
       });
       writeSessionJson(SESSION_REPORT_KEY, hoursData);
       writeSessionJson(SESSION_LEAVES_KEY, leavesData);
-      setReportProgress({ active: true, value: 100, label: 'Données prêtes.' });
+      setReportProgress({
+        active: true,
+        value: 100,
+        title: 'Progression de la collecte',
+        ariaLabel: 'Progression du chargement des données',
+        label: 'Données prêtes.',
+      });
+      setPostProgressFocusTarget('summary');
       const userLabel = leavesData?.user?.resolvedEmail || hoursData?.user?.resolvedEmail || activeUserEmail || '';
       if (userLabel) {
         addToast(`👤 Analyse réalisée pour : ${userLabel}`, 'info');
@@ -775,16 +841,11 @@ export default function App() {
           'warn'
         );
       }
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          smoothFocusAndScroll(summarySectionRef.current, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
-        });
-      }
     } catch (err) {
       if (isAbortError(err)) return;
       addToast(err.message || '❌ Impossible de charger les données 2025.', 'error');
     } finally {
-      setReportProgress({ active: false, value: 0, label: '' });
+      setReportProgress(EMPTY_PROGRESS_STATE);
       setBusyAction('');
       if (controller) releaseRequestController(controller);
     }
@@ -799,31 +860,62 @@ export default function App() {
 
     const controller = beginRequestController();
     setBusyAction('setup');
+    setPostProgressFocusTarget('');
+    setReportProgress({
+      active: true,
+      value: 9,
+      title: 'Progression de la configuration',
+      ariaLabel: 'Progression de la configuration MCP',
+      label: 'Préparation de la configuration MCP...',
+    });
+    const stopProgressTicker = startAutoProgressTicker({ maxValue: 87 });
     try {
+      setReportProgress({
+        active: true,
+        value: 18,
+        title: 'Progression de la configuration',
+        ariaLabel: 'Progression de la configuration MCP',
+        label: 'Configuration automatique en cours...',
+      });
       const data = await postJsonWithRetry('/api/mcp/setup', { token: activeToken }, {
         label: 'Configuration MCP',
         attempts: 2,
         signal: controller.signal,
       });
+      stopProgressTicker();
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
       writeSessionJson(SESSION_CONNECTION_KEY, data.handshake || null);
       if (data.handshake?.ok) {
+        setReportProgress({
+          active: true,
+          value: 100,
+          title: 'Progression de la configuration',
+          ariaLabel: 'Progression de la configuration MCP',
+          label: 'Configuration validée. Démarrage de la collecte...',
+        });
         addToast('✅ Configuration terminée avec succès.', 'success');
         goToStep(3, { force: true });
         await loadYearlyData(activeToken, { signal: controller.signal });
       } else {
+        setReportProgress({
+          active: true,
+          value: 100,
+          title: 'Progression de la configuration',
+          ariaLabel: 'Progression de la configuration MCP',
+          label: 'Configuration terminée, mais connexion non validée.',
+        });
+        setPostProgressFocusTarget('connection');
         addToast('⚠️ La configuration est terminée, mais la connexion reste à corriger.', 'warn');
-        if (typeof window !== 'undefined') {
-          window.requestAnimationFrame(() => {
-            smoothFocusAndScroll(connectionResultRef.current, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
-          });
-        }
       }
     } catch (err) {
+      stopProgressTicker();
       if (isAbortError(err)) return;
+      setPostProgressFocusTarget('connection');
       addToast(err.message || '❌ Échec de la configuration.', 'error');
     } finally {
+      stopProgressTicker();
+      setReportProgress(EMPTY_PROGRESS_STATE);
       setBusyAction('');
       releaseRequestController(controller);
     }
@@ -840,11 +932,28 @@ export default function App() {
 
     const controller = beginRequestController();
     setBusyAction('check');
+    setPostProgressFocusTarget('');
+    setReportProgress({
+      active: true,
+      value: 10,
+      title: 'Progression de la vérification',
+      ariaLabel: 'Progression de la vérification de connexion',
+      label: 'Vérification de la connexion en cours...',
+    });
+    const stopProgressTicker = startAutoProgressTicker({ maxValue: 90 });
     try {
       const data = await postJsonWithRetry('/api/mcp/check', { token: activeToken }, {
         label: 'Vérification de connexion',
         attempts: 3,
         signal: controller.signal,
+      });
+      stopProgressTicker();
+      setReportProgress({
+        active: true,
+        value: 96,
+        title: 'Progression de la vérification',
+        ariaLabel: 'Progression de la vérification de connexion',
+        label: 'Connexion vérifiée. Finalisation...',
       });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
@@ -855,19 +964,34 @@ export default function App() {
         addToast('✅ Connexion validée. Ouverture de la vue des heures.', 'success');
         const shouldLoadData = options.forceDataLoad === true || dataContextRef.current !== contextKey;
         if (!options.skipDataLoad && shouldLoadData) {
+          setReportProgress({
+            active: true,
+            value: 100,
+            title: 'Progression de la vérification',
+            ariaLabel: 'Progression de la vérification de connexion',
+            label: 'Connexion validée. Démarrage de la collecte...',
+          });
           await loadYearlyData(activeToken, { userEmail: requestedUserEmail, signal: controller.signal });
         } else if (!options.skipDataLoad && !shouldLoadData) {
+          setPostProgressFocusTarget('summary');
           addToast('ℹ️ Données déjà disponibles dans la session. Rafraîchissez manuellement si besoin.', 'info');
+        } else {
+          setPostProgressFocusTarget('summary');
         }
       } else {
+        setPostProgressFocusTarget('connection');
         goToStep(2);
         addToast("⚠️ Connexion non validée. Revenez à l'étape 3.", 'warn');
       }
     } catch (err) {
+      stopProgressTicker();
       if (isAbortError(err)) return;
+      setPostProgressFocusTarget('connection');
       goToStep(2);
       addToast(err.message || '❌ Échec de la vérification.', 'error');
     } finally {
+      stopProgressTicker();
+      setReportProgress(EMPTY_PROGRESS_STATE);
       setBusyAction('');
       releaseRequestController(controller);
     }
@@ -973,6 +1097,25 @@ export default function App() {
   }, [reportProgress.active]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    if (!postProgressFocusTarget || reportProgress.active) return undefined;
+
+    const target =
+      postProgressFocusTarget === 'summary'
+        ? summarySectionRef.current
+        : connectionResultRef.current || stepContentRef.current;
+
+    setPostProgressFocusTarget('');
+    if (!target) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      smoothFocusAndScroll(target, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [postProgressFocusTarget, reportProgress.active]);
+
+  useEffect(() => {
     setBenchSubtasksVisibleCount(TABLE_PAGE_SIZE);
     setBenchIssuesVisibleCount(TABLE_PAGE_SIZE);
   }, [benchDetails]);
@@ -1035,7 +1178,8 @@ export default function App() {
     const wasBusy = isBusy;
     abortActiveRequests();
     setBusyAction('');
-    setReportProgress({ active: false, value: 0, label: '' });
+    setReportProgress(EMPTY_PROGRESS_STATE);
+    setPostProgressFocusTarget('');
     setToken('');
     setTargetEmail('');
     setConnection(null);
@@ -1315,10 +1459,15 @@ export default function App() {
     }
 
     setIsExportingPdf(true);
+    let printWindow = null;
     try {
       addToast('🧾 Préparation du PDF...', 'info');
       if (typeof window === 'undefined') {
         throw new Error('Export PDF indisponible dans ce contexte.');
+      }
+      printWindow = window.open('about:blank', '_blank');
+      if (!printWindow || printWindow.closed) {
+        throw new Error("Impossible d'ouvrir la fenêtre PDF. Vérifiez le blocage des popups pour ce site.");
       }
 
       const generatedAt = new Date().toLocaleString('fr-FR');
@@ -1624,27 +1773,43 @@ export default function App() {
       </div>
     </section>
   </div>
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => window.print(), 180);
-    });
-  </script>
 </body>
 </html>`;
 
-      const printWindow = window.open('', '_blank', 'noopener,noreferrer');
-      if (!printWindow) {
-        throw new Error("Impossible d'ouvrir la fenêtre PDF. Autorisez les popups pour ce site.");
-      }
       printWindow.document.open();
       printWindow.document.write(html);
       printWindow.document.close();
+
+      const triggerPrint = () => {
+        try {
+          if (printWindow.closed) return;
+          printWindow.focus();
+          printWindow.print();
+        } catch {
+          // Keep a usable rendered page even if auto print cannot start.
+        }
+      };
+
+      if (printWindow.document.readyState === 'complete') {
+        window.setTimeout(triggerPrint, 220);
+      } else {
+        printWindow.addEventListener('load', () => {
+          window.setTimeout(triggerPrint, 220);
+        }, { once: true });
+      }
 
       addToast(
         '✅ Vue PDF prête. Utilisez "Enregistrer en PDF" dans la fenêtre d’impression.',
         'success'
       );
     } catch (err) {
+      if (printWindow && !printWindow.closed) {
+        try {
+          printWindow.close();
+        } catch {
+          // Ignore close errors.
+        }
+      }
       addToast(err.message || "❌ Impossible d'exporter le PDF.", 'error');
     } finally {
       setIsExportingPdf(false);
@@ -1797,7 +1962,7 @@ export default function App() {
           aria-live="polite"
         >
           <div className="data-progress-top">
-            <strong>Progression de la collecte</strong>
+            <strong>{reportProgress.title || 'Progression en cours'}</strong>
             <span>{Math.round(reportProgress.value)}%</span>
           </div>
           <div
@@ -1806,7 +1971,7 @@ export default function App() {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(clampPercent(reportProgress.value))}
-            aria-label="Progression du chargement des données"
+            aria-label={reportProgress.ariaLabel || 'Progression en cours'}
           >
             <span style={{ width: `${clampPercent(reportProgress.value)}%` }} />
           </div>
