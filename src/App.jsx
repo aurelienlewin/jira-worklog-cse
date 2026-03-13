@@ -1482,9 +1482,11 @@ export default function App() {
                   <div className="meta-row">
                     <span>Tickets bench : {benchDetails.issueCount}</span>
                     <span>Total bench : {formatNumber(benchDetails.issueHours)} h</span>
-                    <span>
-                      Sous-tâches : {benchDetails.subtaskCount} ({formatNumber(benchDetails.subtaskHours)} h)
-                    </span>
+                    {Number(benchDetails.subtaskCount || 0) > 0 ? (
+                      <span>
+                        Sous-tâches : {benchDetails.subtaskCount} ({formatNumber(benchDetails.subtaskHours)} h)
+                      </span>
+                    ) : null}
                     <span>
                       Commentaires bench : {benchDetails.commentCount || 0} ({formatNumber(benchDetails.commentHours || 0)} h)
                     </span>
