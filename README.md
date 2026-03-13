@@ -14,6 +14,7 @@ Application locale (React + Node.js) pour visualiser simplement les heures 2025,
 - affiche un taux bench et un taux d'utilisation,
 - propose des détails (types d'issue, sous-tâches, tickets complets),
 - masque les sections "Sous-tâches" lorsqu'elles sont vides,
+- affiche l'avatar de l'utilisateur analysé (si disponible),
 - résume les commentaires bench (avec Codex + fallback local),
 - permet d'interrompre une session restaurée et d'annuler les requêtes en cours,
 - exporte un `.xlsx` prêt à partager.

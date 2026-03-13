@@ -209,6 +209,42 @@ function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
   );
 }
 
+function getInitials(value) {
+  const text = String(value || '').trim();
+  if (!text) return '?';
+  const compact = text
+    .replace(/[_\-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!compact.length) return text.slice(0, 1).toUpperCase();
+  if (compact.length === 1) return compact[0].slice(0, 1).toUpperCase();
+  return `${compact[0].slice(0, 1)}${compact[1].slice(0, 1)}`.toUpperCase();
+}
+
+function AccountAvatar({ src, label }) {
+  const [hasError, setHasError] = useState(false);
+  const initials = getInitials(label);
+
+  if (!src || hasError) {
+    return (
+      <span className="account-avatar fallback" aria-hidden="true">
+        {initials}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      className="account-avatar"
+      src={src}
+      alt={`Avatar de ${label || 'l’utilisateur'}`}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setHasError(true)}
+    />
+  );
+}
+
 export default function App() {
   const [step, setStep] = useState(0);
   const [token, setToken] = useState('');
@@ -365,6 +401,14 @@ export default function App() {
       String(targetEmail || '').trim() ||
       'Votre compte';
     const mode = fromLeaves?.mode || fromReport?.mode || 'current';
+    const displayName =
+      fromLeaves?.displayName ||
+      fromReport?.displayName ||
+      '';
+    const avatarUrl =
+      fromLeaves?.avatarUrl ||
+      fromReport?.avatarUrl ||
+      '';
     const fallback = mode === 'fallback_current';
     const delegated = mode === 'delegated';
 
@@ -375,7 +419,7 @@ export default function App() {
       message = "L'e-mail demandé n'a pas été trouvé: affichage de votre compte.";
     }
 
-    return { resolvedEmail, mode, message, fallback, delegated };
+    return { resolvedEmail, mode, message, fallback, delegated, displayName, avatarUrl };
   }, [report, leaves, targetEmail]);
 
   const benchNarrative = useMemo(() => {
@@ -1206,7 +1250,18 @@ export default function App() {
                 <p className="section-state">⏳ Cette section se remplit après le chargement des données 2025.</p>
               ) : null}
               <div className={`account-badge ${analysisInfo.fallback ? 'warn' : analysisInfo.delegated ? 'info' : 'ok'}`}>
-                <strong>Compte analysé : {analysisInfo.resolvedEmail}</strong>
+                <div className="account-badge-head">
+                  <AccountAvatar
+                    src={analysisInfo.avatarUrl}
+                    label={analysisInfo.displayName || analysisInfo.resolvedEmail}
+                  />
+                  <div className="account-badge-meta">
+                    <strong>Compte analysé : {analysisInfo.resolvedEmail}</strong>
+                    {analysisInfo.displayName ? (
+                      <small>{analysisInfo.displayName}</small>
+                    ) : null}
+                  </div>
+                </div>
                 <span>{analysisInfo.message}</span>
               </div>
               <div className="progress-dashboard">

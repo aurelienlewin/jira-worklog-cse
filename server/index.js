@@ -540,6 +540,22 @@ function normalizeIdentity(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeAvatarUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/')) return `${TRACKER_URL}${raw}`;
+  return raw;
+}
+
+function extractUserAvatarUrl(user) {
+  if (!user || typeof user !== 'object') return null;
+  const avatars = user.avatarUrls || {};
+  const candidate = avatars['48x48'] || avatars['32x32'] || avatars['24x24'] || avatars['16x16'] || user.avatarUrl || '';
+  const normalized = normalizeAvatarUrl(candidate);
+  return normalized || null;
+}
+
 function normalizeTextForMatch(value) {
   return String(value || '')
     .normalize('NFD')
@@ -1223,6 +1239,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
       mode: userContext.mode,
       requestedEmail: userContext.requestedEmail || null,
       resolvedEmail: userContext.targetUser?.emailAddress || null,
+      avatarUrl: extractUserAvatarUrl(userContext.targetUser),
       displayName:
         userContext.targetUser?.displayName ||
         userContext.targetUser?.name ||
@@ -1357,6 +1374,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
       mode: userContext.mode,
       requestedEmail: userContext.requestedEmail || null,
       resolvedEmail: userContext.targetUser?.emailAddress || null,
+      avatarUrl: extractUserAvatarUrl(userContext.targetUser),
       displayName:
         userContext.targetUser?.displayName ||
         userContext.targetUser?.name ||

@@ -561,6 +561,45 @@ body,
   color: #2d4b2c;
 }
 
+.account-badge-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.account-badge-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-badge-meta small {
+  color: #567255;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(107, 141, 89, 0.35);
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.9);
+  flex: 0 0 auto;
+}
+
+.account-avatar.fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #466045;
+  background: linear-gradient(145deg, rgba(232, 245, 216, 0.96), rgba(248, 255, 241, 0.96));
+}
+
 .account-badge span {
   color: #50694a;
   font-size: 13px;
