@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.14] - 2026-03-13 13:35 CET
+
+### Changed
+
+- Added automatic focus + smooth scroll guidance (150ms) after key actions:
+  - step changes focus the active step content,
+  - failed setup checks focus the connection result line,
+  - completed data loading focuses the summary panel.
+- Implemented reduced-motion-safe behavior for focus scrolling.
+
 ## [1.16.13] - 2026-03-13 13:32 CET
 
 ### Changed

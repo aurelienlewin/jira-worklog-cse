@@ -30,6 +30,7 @@ const API_RETRY_ATTEMPTS = 3;
 const API_RETRY_DELAY_MS = 900;
 const TOAST_TTL_MS = 6000;
 const TOAST_FADE_MS = 320;
+const FOCUS_SCROLL_MS = 150;
 
 function readStoredValue(key) {
   if (typeof window === 'undefined') return '';
@@ -103,6 +104,53 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function prefersReducedMotion() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function smoothFocusAndScroll(element, options = {}) {
+  if (!element || typeof window === 'undefined') return;
+
+  const durationMs = Math.max(80, Number(options.durationMs || FOCUS_SCROLL_MS));
+  const offset = Number(options.offset || 12);
+  const shouldFocus = options.focus !== false;
+  const reduceMotion = prefersReducedMotion();
+  const startY = window.scrollY || window.pageYOffset || 0;
+  const targetY = Math.max(0, startY + element.getBoundingClientRect().top - offset);
+
+  const focusTarget = () => {
+    if (!shouldFocus) return;
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+  };
+
+  if (reduceMotion || Math.abs(targetY - startY) < 2) {
+    window.scrollTo(0, targetY);
+    focusTarget();
+    return;
+  }
+
+  const start = performance.now();
+  const easeOut = (t) => 1 - (1 - t) ** 3;
+
+  const tick = (now) => {
+    const progress = Math.min(1, (now - start) / durationMs);
+    const eased = easeOut(progress);
+    window.scrollTo(0, startY + (targetY - startY) * eased);
+    if (progress < 1) {
+      window.requestAnimationFrame(tick);
+      return;
+    }
+    focusTarget();
+  };
+
+  window.requestAnimationFrame(tick);
+}
+
 function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
   const safeValue = clampPercent(value);
   return (
@@ -133,6 +181,9 @@ export default function App() {
   const [leavesIssuesVisibleCount, setLeavesIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const stepButtonRefs = useRef([]);
   const toastTimersRef = useRef(new Map());
+  const stepContentRef = useRef(null);
+  const connectionResultRef = useRef(null);
+  const summarySectionRef = useRef(null);
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -484,6 +535,11 @@ export default function App() {
           'warn'
         );
       }
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          smoothFocusAndScroll(summarySectionRef.current, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
+        });
+      }
     } catch (err) {
       addToast(err.message || '❌ Impossible de charger les données 2025.', 'error');
     } finally {
@@ -513,6 +569,11 @@ export default function App() {
         await loadYearlyData(activeToken);
       } else {
         addToast('⚠️ La configuration est terminée, mais la connexion reste à corriger.', 'warn');
+        if (typeof window !== 'undefined') {
+          window.requestAnimationFrame(() => {
+            smoothFocusAndScroll(connectionResultRef.current, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
+          });
+        }
       }
     } catch (err) {
       addToast(err.message || '❌ Échec de la configuration.', 'error');
@@ -584,6 +645,14 @@ export default function App() {
     setLeavesSubtasksVisibleCount(TABLE_PAGE_SIZE);
     setLeavesIssuesVisibleCount(TABLE_PAGE_SIZE);
   }, [leavesDetails, leaves]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      smoothFocusAndScroll(stepContentRef.current, { durationMs: FOCUS_SCROLL_MS, offset: 10 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [step]);
 
   function goToStep(nextStepIndex) {
     if (step === nextStepIndex) return;
@@ -788,7 +857,7 @@ export default function App() {
   function renderStepContent() {
     if (step === 0) {
       return (
-        <section className="glass step-card reveal">
+        <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
           <h2>🔑 Étape 1 : créer votre clé d'accès Jira</h2>
           <p>
             Cliquez sur le bouton ci-dessous, créez une clé d'accès personnelle,
@@ -804,7 +873,7 @@ export default function App() {
 
     if (step === 1) {
       return (
-        <section className="glass step-card reveal">
+        <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
           <h2>📘 Étape 2 : lire le guide Codex</h2>
           <p>
             Ouvrez le guide interne et suivez les prérequis.
@@ -819,7 +888,7 @@ export default function App() {
 
     if (step === 2) {
       return (
-        <section className="glass step-card reveal">
+        <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
           <h2>⚙️ Étape 3 : lancer la configuration</h2>
           <label htmlFor="pat-token">Collez votre clé d'accès Jira</label>
           <textarea
@@ -857,7 +926,7 @@ export default function App() {
           </div>
 
           {connection ? (
-            <p className={connection.ok ? 'ok-line' : 'error-line'}>
+            <p ref={connectionResultRef} tabIndex="-1" className={connection.ok ? 'ok-line' : 'error-line'}>
               Résultat de la connexion : {connection.ok ? '✅ Réussie' : '❌ Échec'}
               {connection.initSeconds ? ` (${connection.initSeconds}s)` : ''}
               {connection.message ? ` - ${connection.message}` : ''}
@@ -868,7 +937,7 @@ export default function App() {
     }
 
     return (
-      <section className="glass step-card reveal">
+      <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
         <h2>📊 Étape 4 : vos heures et vos congés 2025</h2>
         <p>
           Cette action charge votre bilan 2025 :
@@ -1016,7 +1085,12 @@ export default function App() {
 
         {step === 3 ? (
           <>
-            <section className={`glass feedback-card reveal${isSummaryReady ? '' : ' section-pending'}`} aria-busy={!isSummaryReady}>
+            <section
+              ref={summarySectionRef}
+              tabIndex="-1"
+              className={`glass feedback-card reveal${isSummaryReady ? '' : ' section-pending'}`}
+              aria-busy={!isSummaryReady}
+            >
               <h3>🧮 Résumé 2025</h3>
               {!isSummaryReady ? (
                 <p className="section-state">⏳ Cette section se remplit après le chargement des données 2025.</p>
