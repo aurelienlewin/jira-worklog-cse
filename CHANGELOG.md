@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.5] - 2026-03-13 13:09 CET
+
+### Changed
+
+- Reworked rendering performance for heavy datasets: bench/leaves large tables are now collapsible and loaded progressively by chunks.
+- Added keyboard-focusable table wrappers with horizontal overflow handling for better readability/accessibility on smaller screens.
+- Limited visible toast backlog to reduce UI overload and repaint pressure.
+- Removed costly visual effects that were causing scroll jank in Chrome (`backdrop-filter`, moving fixed background, entry animations, pulse effects).
+- Strengthened WCAG-oriented ergonomics: higher text legibility, stronger focus rings, larger tap/click targets, and calmer interaction transitions.
+
 ## [1.16.4] - 2026-03-13 12:50 CET
 
 ### Changed

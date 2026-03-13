@@ -25,6 +25,7 @@ const ACTION_LABELS = {
   check: '🔎 Vérification de la connexion en cours...',
   report: '📥 Chargement des heures et des congés en cours...',
 };
+const TABLE_PAGE_SIZE = 60;
 
 function readStoredValue(key) {
   if (typeof window === 'undefined') return '';
@@ -89,6 +90,11 @@ function clampPercent(value) {
   return num;
 }
 
+function nextChunkSize(visible, total) {
+  const remaining = Math.max(0, total - visible);
+  return Math.min(TABLE_PAGE_SIZE, remaining);
+}
+
 function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
   const safeValue = clampPercent(value);
   return (
@@ -113,6 +119,10 @@ export default function App() {
   const [busyAction, setBusyAction] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
+  const [benchSubtasksVisibleCount, setBenchSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
+  const [benchIssuesVisibleCount, setBenchIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
+  const [leavesSubtasksVisibleCount, setLeavesSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
+  const [leavesIssuesVisibleCount, setLeavesIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const stepButtonRefs = useRef([]);
 
   const isBusy = Boolean(busyAction);
@@ -175,6 +185,23 @@ export default function App() {
       subtaskHours,
     };
   }, [leaves]);
+
+  const visibleBenchSubtasks = useMemo(
+    () => (benchDetails?.subtasks || []).slice(0, benchSubtasksVisibleCount),
+    [benchDetails, benchSubtasksVisibleCount]
+  );
+  const visibleBenchIssues = useMemo(
+    () => (benchDetails?.issues || []).slice(0, benchIssuesVisibleCount),
+    [benchDetails, benchIssuesVisibleCount]
+  );
+  const visibleLeavesSubtasks = useMemo(
+    () => (leavesDetails?.subtasks || []).slice(0, leavesSubtasksVisibleCount),
+    [leavesDetails, leavesSubtasksVisibleCount]
+  );
+  const visibleLeavesIssues = useMemo(
+    () => (leaves?.issues || []).slice(0, leavesIssuesVisibleCount),
+    [leaves, leavesIssuesVisibleCount]
+  );
 
   const progressCircles = useMemo(() => {
     const trackedHours = summary.workedHours + summary.leavesHours;
@@ -258,7 +285,10 @@ export default function App() {
   }, [benchDetails]);
 
   function addToast(message, tone = 'info') {
-    setToasts((prev) => [...prev, makeToast(message, tone)]);
+    setToasts((prev) => {
+      const next = [...prev, makeToast(message, tone)];
+      return next.slice(-8);
+    });
   }
 
   function addProgressToasts(lines) {
@@ -430,6 +460,16 @@ export default function App() {
   useEffect(() => {
     writeStoredValue(USER_EMAIL_SESSION_KEY, targetEmail);
   }, [targetEmail]);
+
+  useEffect(() => {
+    setBenchSubtasksVisibleCount(TABLE_PAGE_SIZE);
+    setBenchIssuesVisibleCount(TABLE_PAGE_SIZE);
+  }, [benchDetails]);
+
+  useEffect(() => {
+    setLeavesSubtasksVisibleCount(TABLE_PAGE_SIZE);
+    setLeavesIssuesVisibleCount(TABLE_PAGE_SIZE);
+  }, [leavesDetails, leaves]);
 
   function goToStep(nextStepIndex) {
     if (step === nextStepIndex) return;
@@ -903,29 +943,31 @@ export default function App() {
                     <span>Tickets analysés : {report.issueCount}</span>
                     <span>Temps saisis retenus : {report.worklogCount}</span>
                   </div>
-                  <table className="neon-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Projet</th>
-                        <th scope="col">Nom</th>
-                        <th scope="col">Heures</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.projects.map((project) => (
-                        <tr key={project.projectKey}>
-                          <td>{project.projectKey}</td>
-                          <td>{project.projectName}</td>
-                          <td>{formatNumber(project.hours)}</td>
+                  <div className="table-wrap" tabIndex="0" aria-label="Tableau des heures par projet en 2025">
+                    <table className="neon-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Projet</th>
+                          <th scope="col">Nom</th>
+                          <th scope="col">Heures</th>
                         </tr>
-                      ))}
-                      <tr className="total-row">
-                        <td>TOTAL</td>
-                        <td>Activités 2025</td>
-                        <td>{formatNumber(report.totalHours)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {report.projects.map((project) => (
+                          <tr key={project.projectKey}>
+                            <td>{project.projectKey}</td>
+                            <td>{project.projectName}</td>
+                            <td>{formatNumber(project.hours)}</td>
+                          </tr>
+                        ))}
+                        <tr className="total-row">
+                          <td>TOTAL</td>
+                          <td>Activités 2025</td>
+                          <td>{formatNumber(report.totalHours)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </>
               )}
             </section>
@@ -970,24 +1012,26 @@ export default function App() {
                           {!benchCommentSummary.themes?.length ? (
                             <p>Aucun thème clair détecté.</p>
                           ) : (
-                            <table className="neon-table">
-                              <thead>
-                                <tr>
-                                  <th scope="col">Thème détecté</th>
-                                  <th scope="col">Heures</th>
-                                  <th scope="col">Saisies</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {benchCommentSummary.themes.map((theme) => (
-                                  <tr key={theme.label}>
-                                    <td>{theme.label}</td>
-                                    <td>{formatNumber(theme.hours)}</td>
-                                    <td>{theme.occurrences}</td>
+                            <div className="table-wrap" tabIndex="0" aria-label="Synthèse des thèmes bench">
+                              <table className="neon-table">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Thème détecté</th>
+                                    <th scope="col">Heures</th>
+                                    <th scope="col">Saisies</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {benchCommentSummary.themes.map((theme) => (
+                                    <tr key={theme.label}>
+                                      <td>{theme.label}</td>
+                                      <td>{formatNumber(theme.hours)}</td>
+                                      <td>{theme.occurrences}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           )}
                           {!benchCommentSummary.highlights?.length ? null : (
                             <>
@@ -1010,93 +1054,131 @@ export default function App() {
                       {!benchDetails.issueTypeTotals?.length ? (
                         <p>Pas de répartition disponible.</p>
                       ) : (
-                        <table className="neon-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">Type d'issue</th>
-                              <th scope="col">Heures</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {benchDetails.issueTypeTotals.map((entry) => (
-                              <tr key={entry.issueType}>
-                                <td>{entry.issueType}</td>
-                                <td>{formatNumber(entry.hours)}</td>
+                        <div className="table-wrap" tabIndex="0" aria-label="Répartition bench par type d'issue">
+                          <table className="neon-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Type d'issue</th>
+                                <th scope="col">Heures</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {benchDetails.issueTypeTotals.map((entry) => (
+                                <tr key={entry.issueType}>
+                                  <td>{entry.issueType}</td>
+                                  <td>{formatNumber(entry.hours)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </article>
 
-                    <article className="detail-block">
-                      <h4>🧩 Sous-tâches bench</h4>
+                    <details className="detail-block detail-disclosure">
+                      <summary>🧩 Sous-tâches bench</summary>
                       {!benchDetails.subtasks?.length ? (
                         <p>Aucune sous-tâche bench avec heures en 2025.</p>
                       ) : (
-                        <table className="neon-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">Ticket</th>
-                              <th scope="col">Type</th>
-                              <th scope="col">Parent</th>
-                              <th scope="col">Heures</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {benchDetails.subtasks.map((issue) => (
-                              <tr key={issue.issueKey}>
-                                <td>
-                                  <strong>{issue.issueKey}</strong>
-                                  <br />
-                                  <span>{issue.summary}</span>
-                                </td>
-                                <td>{issue.issueType}</td>
-                                <td>
-                                  {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
-                                </td>
-                                <td>{formatNumber(issue.hours)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <>
+                          <p className="hint">
+                            Affichage de {visibleBenchSubtasks.length} sur {benchDetails.subtasks.length} lignes.
+                          </p>
+                          <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches bench">
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Ticket</th>
+                                  <th scope="col">Type</th>
+                                  <th scope="col">Parent</th>
+                                  <th scope="col">Heures</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visibleBenchSubtasks.map((issue) => (
+                                  <tr key={issue.issueKey}>
+                                    <td>
+                                      <strong>{issue.issueKey}</strong>
+                                      <br />
+                                      <span>{issue.summary}</span>
+                                    </td>
+                                    <td>{issue.issueType}</td>
+                                    <td>
+                                      {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                    </td>
+                                    <td>{formatNumber(issue.hours)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {visibleBenchSubtasks.length < benchDetails.subtasks.length ? (
+                            <button
+                              type="button"
+                              className="neon-btn ghost compact"
+                              onClick={() =>
+                                setBenchSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, benchDetails.subtasks.length))
+                              }
+                            >
+                              Afficher {nextChunkSize(visibleBenchSubtasks.length, benchDetails.subtasks.length)} lignes de plus
+                            </button>
+                          ) : null}
+                        </>
                       )}
-                    </article>
+                    </details>
                   </div>
 
-                  <article className="detail-block">
-                    <h4>🗂️ Tous les tickets bench (tous types)</h4>
+                  <details className="detail-block detail-disclosure">
+                    <summary>🗂️ Tous les tickets bench (tous types)</summary>
                     {!benchDetails.issues?.length ? (
                       <p>Aucun ticket bench avec heures en 2025.</p>
                     ) : (
-                      <table className="neon-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">Ticket</th>
-                            <th scope="col">Type</th>
-                            <th scope="col">Parent</th>
-                            <th scope="col">Heures</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {benchDetails.issues.map((issue) => (
-                            <tr key={issue.issueKey}>
-                              <td>
-                                <strong>{issue.issueKey}</strong>
-                                <br />
-                                <span>{issue.summary}</span>
-                              </td>
-                              <td>{issue.issueType}</td>
-                              <td>
-                                {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
-                              </td>
-                              <td>{formatNumber(issue.hours)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <>
+                        <p className="hint">
+                          Affichage de {visibleBenchIssues.length} sur {benchDetails.issues.length} lignes.
+                        </p>
+                        <div className="table-wrap" tabIndex="0" aria-label="Tous les tickets bench">
+                          <table className="neon-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Ticket</th>
+                                <th scope="col">Type</th>
+                                <th scope="col">Parent</th>
+                                <th scope="col">Heures</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {visibleBenchIssues.map((issue) => (
+                                <tr key={issue.issueKey}>
+                                  <td>
+                                    <strong>{issue.issueKey}</strong>
+                                    <br />
+                                    <span>{issue.summary}</span>
+                                  </td>
+                                  <td>{issue.issueType}</td>
+                                  <td>
+                                    {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                  </td>
+                                  <td>{formatNumber(issue.hours)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {visibleBenchIssues.length < benchDetails.issues.length ? (
+                          <button
+                            type="button"
+                            className="neon-btn ghost compact"
+                            onClick={() =>
+                              setBenchIssuesVisibleCount((prev) => prev + nextChunkSize(prev, benchDetails.issues.length))
+                            }
+                          >
+                            Afficher {nextChunkSize(visibleBenchIssues.length, benchDetails.issues.length)} lignes de plus
+                          </button>
+                        ) : null}
+                      </>
                     )}
-                  </article>
+                  </details>
                 </>
               )}
             </section>
@@ -1127,27 +1209,29 @@ export default function App() {
                       {!leavesDetails.issueTypeTotals?.length ? (
                         <p>Pas de répartition disponible.</p>
                       ) : (
-                        <table className="neon-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">Type d'issue</th>
-                              <th scope="col">Heures</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {leavesDetails.issueTypeTotals.map((entry) => (
-                              <tr key={entry.issueType}>
-                                <td>{entry.issueType}</td>
-                                <td>{formatNumber(entry.hours)}</td>
+                        <div className="table-wrap" tabIndex="0" aria-label="Répartition congés par type d'issue">
+                          <table className="neon-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Type d'issue</th>
+                                <th scope="col">Heures</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {leavesDetails.issueTypeTotals.map((entry) => (
+                                <tr key={entry.issueType}>
+                                  <td>{entry.issueType}</td>
+                                  <td>{formatNumber(entry.hours)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </article>
 
-                    <article className="detail-block">
-                      <h4>🧩 Sous-tâches congés</h4>
+                    <details className="detail-block detail-disclosure">
+                      <summary>🧩 Sous-tâches congés</summary>
                       {!leavesDetails.subtasks?.length ? (
                         <p>Aucune sous-tâche congés avec heures en 2025.</p>
                       ) : (
@@ -1155,70 +1239,104 @@ export default function App() {
                           <p className="hint">
                             {leavesDetails.subtaskCount} sous-tâches, soit {formatNumber(leavesDetails.subtaskHours)} h.
                           </p>
-                          <table className="neon-table">
-                            <thead>
-                              <tr>
-                                <th scope="col">Ticket</th>
-                                <th scope="col">Type</th>
-                                <th scope="col">Parent</th>
-                                <th scope="col">Heures</th>
-                                <th scope="col">Jours</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {leavesDetails.subtasks.map((issue) => (
-                                <tr key={issue.issueKey}>
-                                  <td>
-                                    <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
-                                      {issue.issueKey}
-                                    </a>
-                                    <br />
-                                    <span>{issue.summary}</span>
-                                  </td>
-                                  <td>{issue.issueType}</td>
-                                  <td>{issue.parentKey || '-'}</td>
-                                  <td>{formatNumber(issue.hours)}</td>
-                                  <td>{formatNumber(issue.days)}</td>
+                          <p className="hint">
+                            Affichage de {visibleLeavesSubtasks.length} sur {leavesDetails.subtasks.length} lignes.
+                          </p>
+                          <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches congés">
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Ticket</th>
+                                  <th scope="col">Type</th>
+                                  <th scope="col">Parent</th>
+                                  <th scope="col">Heures</th>
+                                  <th scope="col">Jours</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {visibleLeavesSubtasks.map((issue) => (
+                                  <tr key={issue.issueKey}>
+                                    <td>
+                                      <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
+                                        {issue.issueKey}
+                                      </a>
+                                      <br />
+                                      <span>{issue.summary}</span>
+                                    </td>
+                                    <td>{issue.issueType}</td>
+                                    <td>{issue.parentKey || '-'}</td>
+                                    <td>{formatNumber(issue.hours)}</td>
+                                    <td>{formatNumber(issue.days)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {visibleLeavesSubtasks.length < leavesDetails.subtasks.length ? (
+                            <button
+                              type="button"
+                              className="neon-btn ghost compact"
+                              onClick={() =>
+                                setLeavesSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, leavesDetails.subtasks.length))
+                              }
+                            >
+                              Afficher {nextChunkSize(visibleLeavesSubtasks.length, leavesDetails.subtasks.length)} lignes de plus
+                            </button>
+                          ) : null}
                         </>
                       )}
-                    </article>
+                    </details>
                   </div>
 
-                  <h4>🗂️ Tous les tickets congés (tous types)</h4>
-                  <table className="neon-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Ticket</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Statut</th>
-                        <th scope="col">Parent</th>
-                        <th scope="col">Heures</th>
-                        <th scope="col">Jours</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {leaves.issues.map((issue) => (
-                        <tr key={issue.issueKey}>
-                          <td>
-                            <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
-                              {issue.issueKey}
-                            </a>
-                            <br />
-                            <span>{issue.summary}</span>
-                          </td>
-                          <td>{issue.issueType}</td>
-                          <td>{issue.status}</td>
-                          <td>{issue.parentKey || '-'}</td>
-                          <td>{formatNumber(issue.hours)}</td>
-                          <td>{formatNumber(issue.days)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <details className="detail-block detail-disclosure">
+                    <summary>🗂️ Tous les tickets congés (tous types)</summary>
+                    <p className="hint">
+                      Affichage de {visibleLeavesIssues.length} sur {leaves.issues.length} lignes.
+                    </p>
+                    <div className="table-wrap" tabIndex="0" aria-label="Tous les tickets congés">
+                      <table className="neon-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Ticket</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Statut</th>
+                            <th scope="col">Parent</th>
+                            <th scope="col">Heures</th>
+                            <th scope="col">Jours</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visibleLeavesIssues.map((issue) => (
+                            <tr key={issue.issueKey}>
+                              <td>
+                                <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
+                                  {issue.issueKey}
+                                </a>
+                                <br />
+                                <span>{issue.summary}</span>
+                              </td>
+                              <td>{issue.issueType}</td>
+                              <td>{issue.status}</td>
+                              <td>{issue.parentKey || '-'}</td>
+                              <td>{formatNumber(issue.hours)}</td>
+                              <td>{formatNumber(issue.days)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {visibleLeavesIssues.length < leaves.issues.length ? (
+                      <button
+                        type="button"
+                        className="neon-btn ghost compact"
+                        onClick={() =>
+                          setLeavesIssuesVisibleCount((prev) => prev + nextChunkSize(prev, leaves.issues.length))
+                        }
+                      >
+                        Afficher {nextChunkSize(visibleLeavesIssues.length, leaves.issues.length)} lignes de plus
+                      </button>
+                    ) : null}
+                  </details>
                 </>
               )}
             </section>
