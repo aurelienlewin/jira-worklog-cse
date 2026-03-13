@@ -7,6 +7,7 @@ const CODEX_GUIDE_URL =
 
 const TOKEN_SESSION_KEY = 'jira_worklog_cse_token';
 const LEAVES_ISSUE_KEY = 'ZLH-1';
+const LEAVES_SCOPE_LABEL = 'ZLH-*';
 const BENCH_PROJECT_KEY = 'WAROE';
 const BENCH_DETAIL_PROJECT_KEYS = [BENCH_PROJECT_KEY];
 
@@ -42,6 +43,27 @@ function makeToast(message, tone = 'info') {
   return { id, message, tone };
 }
 
+function clampPercent(value) {
+  const num = Number(value || 0);
+  if (Number.isNaN(num)) return 0;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return num;
+}
+
+function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
+  const safeValue = clampPercent(value);
+  return (
+    <article className="progress-card">
+      <div className={`progress-circle tone-${tone}`} style={{ '--pct': `${safeValue}%` }}>
+        <span>{formatPercent(safeValue)}</span>
+      </div>
+      <h4>{title}</h4>
+      <small>{subtitle}</small>
+    </article>
+  );
+}
+
 export default function App() {
   const [step, setStep] = useState(0);
   const [token, setToken] = useState('');
@@ -50,6 +72,7 @@ export default function App() {
   const [leaves, setLeaves] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [busyAction, setBusyAction] = useState('');
+  const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -112,6 +135,38 @@ export default function App() {
     };
   }, [leaves]);
 
+  const progressCircles = useMemo(() => {
+    const trackedHours = summary.workedHours + summary.leavesHours;
+    const workedShare = trackedHours > 0 ? (summary.workedHours / trackedHours) * 100 : 0;
+    const leavesShare = trackedHours > 0 ? (summary.leavesHours / trackedHours) * 100 : 0;
+    return [
+      {
+        title: 'Utilisation',
+        subtitle: '100 % - taux WAROE',
+        value: summary.utilizationRate,
+        tone: 'leaf',
+      },
+      {
+        title: 'Part WAROE',
+        subtitle: `${formatNumber(summary.waroeHours)} h sur vos heures 2025`,
+        value: summary.waroeRate,
+        tone: 'sun',
+      },
+      {
+        title: 'Part heures travaillées',
+        subtitle: `${formatNumber(summary.workedHours)} h`,
+        value: workedShare,
+        tone: 'sky',
+      },
+      {
+        title: 'Part congés/absences',
+        subtitle: `${formatNumber(summary.leavesHours)} h (${formatNumber(summary.leavesDays)} jours)`,
+        value: leavesShare,
+        tone: 'rose',
+      },
+    ];
+  }, [summary]);
+
   function addToast(message, tone = 'info') {
     setToasts((prev) => [...prev, makeToast(message, tone)]);
   }
@@ -149,31 +204,43 @@ export default function App() {
     }
 
     setBusyAction('report');
+    setReportProgress({ active: true, value: 6, label: 'Connexion à Jira en cours...' });
     try {
-      const [hoursData, leavesData] = await Promise.all([
-        postJson('/api/jira/report', {
-          token: activeToken,
-          detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
-        }),
-        postJson('/api/jira/leaves', {
-          token: activeToken,
-          issueKey: LEAVES_ISSUE_KEY,
-        }),
-      ]);
+      setReportProgress({ active: true, value: 22, label: 'Collecte des heures travaillées 2025...' });
+      const hoursData = await postJson('/api/jira/report', {
+        token: activeToken,
+        detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
+      });
+
+      setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVES_SCOPE_LABEL}...` });
+      const leavesData = await postJson('/api/jira/leaves', {
+        token: activeToken,
+        issueKey: LEAVES_ISSUE_KEY,
+      });
+
+      setReportProgress({ active: true, value: 91, label: 'Calcul des indicateurs en cours...' });
 
       setReport(hoursData);
       setLeaves(leavesData);
+      setReportProgress({ active: true, value: 100, label: 'Données prêtes.' });
       addToast(
         `✅ Rapport chargé : ${formatNumber(hoursData.totalHours)} h de travail en 2025.`,
         'success'
       );
       addToast(
-        `🌴 Congés chargés (${LEAVES_ISSUE_KEY}) : ${formatNumber(leavesData.totalHours)} h, soit ${formatNumber(leavesData.totalDays)} jours.`,
+        `🌴 Congés/absences chargés (${LEAVES_SCOPE_LABEL}) : ${formatNumber(leavesData.totalHours)} h, soit ${formatNumber(leavesData.totalDays)} jours.`,
         'success'
       );
+      if (!Number(leavesData.totalHours || 0)) {
+        addToast(
+          `ℹ️ Aucun temps trouvé sur ${LEAVES_SCOPE_LABEL} pour 2025 avec ce PAT.`,
+          'warn'
+        );
+      }
     } catch (err) {
       addToast(err.message || '❌ Impossible de charger les données 2025.', 'error');
     } finally {
+      setReportProgress({ active: false, value: 0, label: '' });
       setBusyAction('');
     }
   }
@@ -348,7 +415,7 @@ export default function App() {
         <h2>📊 Étape 4 : vos heures et vos congés 2025</h2>
         <p>
           Cette action charge votre bilan 2025 :
-          temps de travail par projet et suivi des congés ({LEAVES_ISSUE_KEY}).
+          temps de travail par projet, puis congés et absences sur {LEAVES_SCOPE_LABEL}.
         </p>
         <div className="actions">
           <button
@@ -387,6 +454,19 @@ export default function App() {
         <div className="glass loading-strip" role="status" aria-live="polite">
           <span className="spinner" aria-hidden="true" />
           <span>{ACTION_LABELS[busyAction]}</span>
+        </div>
+      ) : null}
+
+      {reportProgress.active ? (
+        <div className="glass data-progress reveal" role="status" aria-live="polite">
+          <div className="data-progress-top">
+            <strong>Progression de la collecte</strong>
+            <span>{Math.round(reportProgress.value)}%</span>
+          </div>
+          <div className="data-progress-track" aria-hidden="true">
+            <span style={{ width: `${clampPercent(reportProgress.value)}%` }} />
+          </div>
+          <p>{reportProgress.label}</p>
         </div>
       ) : null}
 
@@ -441,6 +521,17 @@ export default function App() {
           <>
             <section className="glass feedback-card reveal">
               <h3>🧮 Résumé 2025</h3>
+              <div className="progress-dashboard">
+                {progressCircles.map((item) => (
+                  <ProgressCircle
+                    key={item.title}
+                    value={item.value}
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    tone={item.tone}
+                  />
+                ))}
+              </div>
               <div className="summary-grid">
                 <article className="summary-card">
                   <h4>⏱️ Heures travaillées</h4>
@@ -619,19 +710,24 @@ export default function App() {
             </section>
 
             <section className="glass feedback-card reveal">
-              <h3>🌴 Suivi des congés annuels ({LEAVES_ISSUE_KEY})</h3>
+              <h3>🌴 Suivi des congés et absences ({LEAVES_SCOPE_LABEL})</h3>
               {!leaves?.issues?.length ? (
-                <p>Pas de congés chargés pour le moment.</p>
+                <p>Pas de congés/absences chargés pour le moment.</p>
               ) : (
                 <>
                   <div className="meta-row">
-                    <span>Tickets congés : {leaves.issueCount}</span>
+                    <span>Tickets ZLH : {leaves.issueCount}</span>
                     <span>Temps saisis retenus : {leaves.worklogCount}</span>
                     <span>Total : {formatNumber(leaves.totalHours)} h</span>
                     <span>
                       Jours ({leaves.workingDayHours}h) : {formatNumber(leaves.totalDays)}
                     </span>
                   </div>
+                  {leaves?.discovery?.usedFallbackScope ? (
+                    <p className="hint">
+                      Certains filtres Jira n étaient pas disponibles. Un mode de secours a été utilisé.
+                    </p>
+                  ) : null}
 
                   <div className="detail-grid">
                     <article className="detail-block">

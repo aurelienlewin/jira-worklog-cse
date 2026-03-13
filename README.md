@@ -10,6 +10,7 @@ Objectif:
 - afficher les heures travaillees en 2025 par projet Jira, avec total final,
 - afficher les conges 2025 et un resume clair des indicateurs utiles.
 - afficher des panneaux de detail pour le bench (`WAROE`) et les conges, avec sous-taches et repartition par type d'issue (tous types).
+- afficher les conges/absences sur tout le scope `ZLH-*` (ex: `ZLH-1`, `ZLH-2`, `ZLH-4`) quand du temps est saisi sur votre utilisateur.
 
 ## Interface
 
@@ -21,16 +22,18 @@ Le parcours est organise en 4 etapes claires:
 4. Charger le rapport des heures et conges 2025
 
 L'application affiche des etats de chargement explicites et des toasts cumulatives dismissables.
+Un indicateur de progression en temps reel est affiche pendant la collecte des donnees Jira.
 Le theme visuel est volontairement clair et apaisant (printemps, lever de soleil, ambiance campagne).
 La cle d'acces est memorisee dans la session navigateur pour reprendre automatiquement sur l'etape 4.
 
 Le rapport inclut:
 
 - les heures totales par projet,
-- un suivi des conges annuels base sur l'issue `ZLH-1`.
+- un suivi des conges/absences base sur tout le scope `ZLH-*` pour votre utilisateur.
 - des panneaux de synthese: total heures travaillees, total heures/jours de conges, taux WAROE et taux d'utilisation.
+- un dashboard de cercles de progression pour visualiser rapidement les ratios cles.
 - un panneau bench `WAROE`: repartition par type d'issue, sous-taches, liste complete des tickets.
-- un panneau conges `ZLH-1`: repartition par type d'issue, sous-taches, liste complete des tickets.
+- un panneau conges `ZLH-*`: repartition par type d'issue, sous-taches, liste complete des tickets.
 
 ## Prerequis
 

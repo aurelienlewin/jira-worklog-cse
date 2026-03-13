@@ -315,14 +315,14 @@ function sameUser(author, me) {
   if (!author || !me) return false;
 
   const left = new Set(
-    [author.name, author.key, author.emailAddress, author.accountId]
+    [author.name, author.key, author.emailAddress, author.accountId, author.displayName, author.self]
       .filter(Boolean)
-      .map((v) => String(v).toLowerCase())
+      .map((v) => String(v).trim().toLowerCase())
   );
   const right = new Set(
-    [me.name, me.key, me.emailAddress, me.accountId]
+    [me.name, me.key, me.emailAddress, me.accountId, me.displayName, me.self]
       .filter(Boolean)
-      .map((v) => String(v).toLowerCase())
+      .map((v) => String(v).trim().toLowerCase())
   );
 
   for (const v of left) {
@@ -365,6 +365,19 @@ async function searchAllIssuesByJql(token, jql, fields, maxResults = 100) {
   }
 
   return allIssues;
+}
+
+function escapeJqlString(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+async function searchIssuesByJqlSafe(token, jql, fields) {
+  try {
+    const issues = await searchAllIssuesByJql(token, jql, fields);
+    return { ok: true, issues, error: '' };
+  } catch (err) {
+    return { ok: false, issues: [], error: err?.message || 'Erreur JQL' };
+  }
 }
 
 function normalizeProjectKeys(inputKeys) {
@@ -527,11 +540,57 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
 
 async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY) {
   const me = await jiraFetchJson(token, '/rest/api/2/myself');
-  const leavesIssues = await searchAllIssuesByJql(
-    token,
-    `issuekey = ${rootIssueKey} OR parent = ${rootIssueKey}`,
-    'key,summary,status,issuetype,parent'
-  );
+  const normalizedRootKey = String(rootIssueKey || ANNUAL_LEAVES_ISSUE_KEY).trim().toUpperCase();
+  const escapedRootKey = escapeJqlString(normalizedRootKey);
+  const leavesProjectKey = normalizedRootKey.includes('-') ? normalizedRootKey.split('-')[0] : normalizedRootKey;
+  const fields = 'key,summary,status,issuetype,parent';
+  const issueByKey = new Map();
+  const discoveryLogs = [];
+  let usedFallbackScope = false;
+  const projectScopeJql =
+    'worklogAuthor = currentUser() ' +
+    'AND worklogDate >= "2025-01-01" ' +
+    'AND worklogDate <= "2025-12-31" ' +
+    `AND project = ${leavesProjectKey}`;
+
+  const projectScopeResult = await searchIssuesByJqlSafe(token, projectScopeJql, fields);
+  if (projectScopeResult.ok) {
+    for (const issue of projectScopeResult.issues) {
+      issueByKey.set(issue.key, issue);
+    }
+  } else {
+    discoveryLogs.push(`Projet ${leavesProjectKey} non accessible via ce filtre.`);
+  }
+
+  if (!issueByKey.size) {
+    const scopeQueries = [
+      `issuekey = ${normalizedRootKey}`,
+      `parent = ${normalizedRootKey}`,
+      `"Epic Link" = ${normalizedRootKey}`,
+      `"Parent Link" = ${normalizedRootKey}`,
+      `issue in linkedIssues("${escapedRootKey}")`,
+    ];
+
+    for (const scope of scopeQueries) {
+      const jql =
+        'worklogAuthor = currentUser() ' +
+        'AND worklogDate >= "2025-01-01" ' +
+        'AND worklogDate <= "2025-12-31" ' +
+        `AND (${scope})`;
+      const result = await searchIssuesByJqlSafe(token, jql, fields);
+      if (!result.ok) {
+        discoveryLogs.push(`Filtre non disponible: ${scope}`);
+        continue;
+      }
+      for (const issue of result.issues) {
+        issueByKey.set(issue.key, issue);
+      }
+    }
+
+    usedFallbackScope = true;
+  }
+
+  const leavesIssues = [...issueByKey.values()];
 
   let keptWorklogs = 0;
   let totalSeconds = 0;
@@ -602,7 +661,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
   const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
 
   return {
-    issueKey: rootIssueKey,
+    issueKey: normalizedRootKey,
     issueCount: issues.length,
     worklogCount: keptWorklogs,
     totalHours,
@@ -610,6 +669,12 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
     issueTypeTotals,
     subtaskCount: subtasks.length,
     subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
+    discovery: {
+      projectKey: leavesProjectKey,
+      usedFallbackScope,
+      sourceIssueCount: leavesIssues.length,
+      notes: discoveryLogs,
+    },
     workingDayHours: WORKING_DAY_HOURS,
     issues,
   };

@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-03-13 12:13 CET
+
+### Added
+
+- Added dashboard-style progress circles in the summary section to visualize key 2025 ratios.
+- Added a dedicated data collection progress indicator (percentage + current step) while Jira data is loading.
+
+### Changed
+
+- Leaves/absences aggregation now uses the full `ZLH-*` scope for the connected user in 2025 (including cases like `ZLH-1`, `ZLH-2`, `ZLH-4`).
+- Improved leaves user matching robustness on worklogs by comparing additional Jira identity fields.
+
 ## [1.11.0] - 2026-03-13 12:09 CET
 
 ### Added
