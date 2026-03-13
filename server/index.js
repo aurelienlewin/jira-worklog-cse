@@ -14,6 +14,9 @@ const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
 const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
 const ANNUAL_LEAVES_ISSUE_KEY = 'ZLH-1';
 const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
+const MAX_COMMENT_SAMPLES_PER_PROJECT = Number(process.env.MAX_COMMENT_SAMPLES_PER_PROJECT || 120);
+const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 45000);
+const BENCH_PROJECT_KEY = 'WAROE';
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = 'mcp-atlassian-dev-osf';
@@ -398,8 +401,288 @@ function normalizeTextForMatch(value) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function normalizeTextForDisplay(value) {
+  return String(value || '')
+    .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function flattenAdfNode(node, sink) {
+  if (!node) return;
+  if (typeof node === 'string') {
+    sink.push(node);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const child of node) flattenAdfNode(child, sink);
+    return;
+  }
+  if (typeof node === 'object') {
+    if (typeof node.text === 'string') {
+      sink.push(node.text);
+    }
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) flattenAdfNode(child, sink);
+    }
+  }
+}
+
+function extractWorklogCommentText(comment) {
+  if (!comment) return '';
+  if (typeof comment === 'string') return normalizeTextForDisplay(comment);
+  const chunks = [];
+  flattenAdfNode(comment, chunks);
+  return normalizeTextForDisplay(chunks.join(' '));
+}
+
+const BENCH_THEME_RULES = [
+  {
+    label: 'Support interne et aide aux collègues',
+    keywords: ['support', 'help', 'aide', 'entraide', 'peer', 'coach', 'accompagnement', 'mentorat'],
+  },
+  {
+    label: 'Formation, montée en compétences',
+    keywords: ['formation', 'learning', 'apprentissage', 'certification', 'training', 'upskill', 'veille'],
+  },
+  {
+    label: 'Documentation et capitalisation',
+    keywords: ['documentation', 'doc', 'confluence', 'readme', 'guide', 'process', 'template', 'knowledge'],
+  },
+  {
+    label: 'Avant-vente, cadrage, préparation mission',
+    keywords: ['presales', 'pre-sales', 'avantvente', 'avant-vente', 'proposal', 'estimation', 'cadrage', 'discovery'],
+  },
+  {
+    label: 'Ops internes et coordination',
+    keywords: ['meeting', 'sync', 'coordination', 'planification', 'planning', 'retro', 'standup', 'admin'],
+  },
+];
+
+function summarizeBenchCommentsHeuristic(commentEntries) {
+  const validComments = (commentEntries || [])
+    .filter((entry) => Number(entry.seconds || 0) > 0)
+    .map((entry) => ({
+      ...entry,
+      comment: normalizeTextForDisplay(entry.comment),
+    }))
+    .filter((entry) => entry.comment);
+
+  if (!validComments.length) {
+    return {
+      message: "Aucun commentaire bench exploitable n'a été trouvé dans vos saisies 2025.",
+      commentedWorklogs: 0,
+      commentedHours: 0,
+      themes: [],
+      highlights: [],
+      source: 'heuristic',
+    };
+  }
+
+  const totalSeconds = validComments.reduce((sum, entry) => sum + Number(entry.seconds || 0), 0);
+  const themeMap = new Map();
+  const uniqueByText = new Set();
+  const highlights = [];
+
+  for (const entry of validComments) {
+    const normalized = normalizeTextForMatch(entry.comment);
+    let matchedTheme = false;
+
+    for (const rule of BENCH_THEME_RULES) {
+      const matches = rule.keywords.some((kw) => normalized.includes(normalizeTextForMatch(kw)));
+      if (!matches) continue;
+      const current = themeMap.get(rule.label) || { seconds: 0, occurrences: 0 };
+      current.seconds += Number(entry.seconds || 0);
+      current.occurrences += 1;
+      themeMap.set(rule.label, current);
+      matchedTheme = true;
+    }
+
+    if (!matchedTheme) {
+      const current = themeMap.get('Autres activités bench') || { seconds: 0, occurrences: 0 };
+      current.seconds += Number(entry.seconds || 0);
+      current.occurrences += 1;
+      themeMap.set('Autres activités bench', current);
+    }
+
+    const dedupeKey = normalizeTextForMatch(entry.comment);
+    if (!dedupeKey || uniqueByText.has(dedupeKey)) continue;
+    uniqueByText.add(dedupeKey);
+    if (highlights.length < 5) {
+      highlights.push({
+        issueKey: entry.issueKey,
+        hours: Number((Number(entry.seconds || 0) / 3600).toFixed(2)),
+        comment: entry.comment.slice(0, 220),
+      });
+    }
+  }
+
+  const themes = [...themeMap.entries()]
+    .map(([label, value]) => ({
+      label,
+      hours: Number((Number(value.seconds || 0) / 3600).toFixed(2)),
+      occurrences: Number(value.occurrences || 0),
+    }))
+    .sort((a, b) => b.hours - a.hours);
+
+  const topThemes = themes.slice(0, 3).map((theme) => `${theme.label} (${theme.hours} h)`);
+  const message = topThemes.length
+    ? `Sur le bench, vos commentaires parlent surtout de ${topThemes.join(', ')}.`
+    : "Vos commentaires bench existent, mais aucun thème dominant n'a été détecté.";
+
+  return {
+    message,
+    commentedWorklogs: validComments.length,
+    commentedHours: Number((totalSeconds / 3600).toFixed(2)),
+    themes,
+    highlights,
+    source: 'heuristic',
+  };
+}
+
+function safeJsonObjectFromText(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first < 0 || last <= first) return null;
+  const candidate = text.slice(first, last + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCodexThemes(themes) {
+  if (!Array.isArray(themes)) return [];
+  return themes
+    .map((theme) => ({
+      label: String(theme?.label || '').trim(),
+      hours: Number(theme?.hours || 0),
+      occurrences: Number(theme?.occurrences || 0),
+    }))
+    .filter((theme) => theme.label)
+    .map((theme) => ({
+      ...theme,
+      hours: Number(Number(theme.hours || 0).toFixed(2)),
+      occurrences: Number.isFinite(theme.occurrences) && theme.occurrences > 0
+        ? Math.round(theme.occurrences)
+        : 0,
+    }));
+}
+
+function normalizeCodexHighlights(highlights) {
+  if (!Array.isArray(highlights)) return [];
+  return highlights
+    .map((entry) => ({
+      issueKey: String(entry?.issueKey || '').trim(),
+      hours: Number(entry?.hours || 0),
+      comment: normalizeTextForDisplay(entry?.comment || ''),
+    }))
+    .filter((entry) => entry.issueKey && entry.comment)
+    .map((entry) => ({
+      ...entry,
+      hours: Number(Number(entry.hours || 0).toFixed(2)),
+      comment: entry.comment.slice(0, 220),
+    }));
+}
+
+function buildCodexBenchPrompt(projectKey, comments, heuristicSummary) {
+  const compactComments = (comments || [])
+    .slice(0, 40)
+    .map((entry, index) => {
+      const started = entry.started ? String(entry.started).slice(0, 10) : 'date inconnue';
+      const hours = Number((Number(entry.seconds || 0) / 3600).toFixed(2));
+      return `${index + 1}. ${entry.issueKey} | ${started} | ${hours} h | ${entry.comment}`;
+    })
+    .join('\n');
+
+  const context = [
+    `Projet bench: ${projectKey}`,
+    `Saisies commentées: ${heuristicSummary.commentedWorklogs}`,
+    `Heures commentées: ${heuristicSummary.commentedHours}`,
+  ].join('\n');
+
+  return [
+    'Tu es Codex. Tu aides une personne à expliquer clairement son activité bench en français.',
+    "Objectif: résumer le type d'activités bench réellement décrit dans les commentaires Jira ci-dessous.",
+    'Contraintes:',
+    '- Français simple, concret, humain, sans jargon technique.',
+    '- Pas de jugement, pas de spéculation.',
+    '- Résume seulement ce qui est présent dans les commentaires.',
+    '- Réponds UNIQUEMENT en JSON strict.',
+    'Format JSON attendu:',
+    '{"message":"string","themes":[{"label":"string","hours":0,"occurrences":0}],"highlights":[{"issueKey":"WAROE-1","hours":0,"comment":"string"}]}',
+    '',
+    'Contexte:',
+    context,
+    '',
+    'Commentaires bench:',
+    compactComments || '(aucun commentaire exploitable)',
+  ].join('\n');
+}
+
+async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
+  const heuristic = summarizeBenchCommentsHeuristic(commentEntries);
+  if (!heuristic.commentedWorklogs) return heuristic;
+
+  const sortedEntries = [...(commentEntries || [])]
+    .filter((entry) => normalizeTextForDisplay(entry.comment))
+    .sort((a, b) => {
+      const right = new Date(b.started || 0).getTime();
+      const left = new Date(a.started || 0).getTime();
+      return right - left;
+    });
+
+  const prompt = buildCodexBenchPrompt(projectKey, sortedEntries, heuristic);
+  const result = await runCommand(
+    'codex',
+    ['exec', '--skip-git-repo-check', '-C', process.cwd(), prompt],
+    {
+      timeoutMs: CODEX_SUMMARY_TIMEOUT_MS,
+      env: {
+        CODEX_OTEL_ENABLED: 'false',
+      },
+    }
+  );
+
+  if (result.code !== 0) {
+    return {
+      ...heuristic,
+      source: 'heuristic_fallback',
+    };
+  }
+
+  const parsed = safeJsonObjectFromText(result.stdout);
+  if (!parsed || typeof parsed !== 'object') {
+    return {
+      ...heuristic,
+      source: 'heuristic_fallback',
+    };
+  }
+
+  const parsedMessage = normalizeTextForDisplay(parsed.message || '');
+  const parsedThemes = normalizeCodexThemes(parsed.themes);
+  const parsedHighlights = normalizeCodexHighlights(parsed.highlights);
+
+  return {
+    message: parsedMessage || heuristic.message,
+    commentedWorklogs: heuristic.commentedWorklogs,
+    commentedHours: heuristic.commentedHours,
+    themes: parsedThemes.length ? parsedThemes : heuristic.themes,
+    highlights: parsedHighlights.length ? parsedHighlights : heuristic.highlights,
+    source: 'codex_exec',
+  };
+}
+
 function extractLeaveTargetFromComment(comment) {
-  const text = String(comment || '');
+  const text = extractWorklogCommentText(comment);
   const match = text.match(/Leave Day record for user\s*:\s*([^,]+)/i);
   return match?.[1]?.trim() || '';
 }
@@ -608,6 +891,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
             projectKey,
             projectName,
             issues: new Map(),
+            commentEntries: [],
           };
 
           const issueDetail = projectDetail.issues.get(issueKey) || {
@@ -621,6 +905,17 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
           };
           issueDetail.seconds += seconds;
           projectDetail.issues.set(issueKey, issueDetail);
+
+          const commentText = extractWorklogCommentText(wl.comment);
+          if (commentText && projectDetail.commentEntries.length < MAX_COMMENT_SAMPLES_PER_PROJECT) {
+            projectDetail.commentEntries.push({
+              issueKey,
+              started: wl.started || null,
+              seconds,
+              comment: commentText,
+            });
+          }
+
           detailedByProject.set(projectKey, projectDetail);
         }
       }
@@ -669,6 +964,13 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
           hours: Number((seconds / 3600).toFixed(2)),
         }))
         .sort((a, b) => b.hours - a.hours);
+      const commentEntries = [...(project.commentEntries || [])]
+        .sort((a, b) => {
+          const left = new Date(a.started || 0).getTime();
+          const right = new Date(b.started || 0).getTime();
+          return right - left;
+        });
+      const commentSummary = summarizeBenchCommentsHeuristic(commentEntries);
       return {
         projectKey: project.projectKey,
         projectName: project.projectName,
@@ -679,6 +981,10 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
         subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
         issues,
         subtasks,
+        commentCount: commentSummary.commentedWorklogs,
+        commentHours: commentSummary.commentedHours,
+        commentSummary,
+        _commentEntries: commentEntries,
       };
     })
     .sort((a, b) => a.projectKey.localeCompare(b.projectKey));
@@ -695,9 +1001,41 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
       subtaskHours: 0,
       issues: [],
       subtasks: [],
+      commentCount: 0,
+      commentHours: 0,
+      commentSummary: {
+        message: "Aucun commentaire bench exploitable n'a été trouvé dans vos saisies 2025.",
+        commentedWorklogs: 0,
+        commentedHours: 0,
+        themes: [],
+        highlights: [],
+        source: 'heuristic',
+      },
+      _commentEntries: [],
     });
   }
   detailedProjects.sort((a, b) => a.projectKey.localeCompare(b.projectKey));
+
+  await mapLimit(detailedProjects, 2, async (project) => {
+    const entries = Array.isArray(project._commentEntries) ? project._commentEntries : [];
+    if (!entries.length) return;
+    if (project.projectKey !== BENCH_PROJECT_KEY) return;
+
+    const codexSummary = await summarizeBenchCommentsWithCodex(project.projectKey, entries);
+    project.commentSummary = codexSummary;
+    project.commentCount = codexSummary.commentedWorklogs;
+    project.commentHours = codexSummary.commentedHours;
+
+    if (codexSummary.source === 'codex_exec') {
+      discoveryLogs.push(`Résumé des commentaires ${project.projectKey}: généré avec codex exec.`);
+    } else {
+      discoveryLogs.push(`Résumé des commentaires ${project.projectKey}: mode secours (règles locales).`);
+    }
+  });
+
+  for (const project of detailedProjects) {
+    delete project._commentEntries;
+  }
 
   return {
     user: {

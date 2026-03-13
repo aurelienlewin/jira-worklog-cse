@@ -253,6 +253,10 @@ export default function App() {
     return parts.join(' ');
   }, [benchDetails]);
 
+  const benchCommentSummary = useMemo(() => {
+    return benchDetails?.commentSummary || null;
+  }, [benchDetails]);
+
   function addToast(message, tone = 'info') {
     setToasts((prev) => [...prev, makeToast(message, tone)]);
   }
@@ -533,6 +537,10 @@ export default function App() {
         { Indicateur: 'Heures WAROE', Valeur: summary.waroeHours },
         { Indicateur: 'Taux WAROE (%)', Valeur: Number(summary.waroeRate.toFixed(2)) },
         { Indicateur: "Taux d'utilisation (%)", Valeur: Number(summary.utilizationRate.toFixed(2)) },
+        {
+          Indicateur: 'Résumé commentaires bench',
+          Valeur: benchCommentSummary?.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local',
+        },
       ];
       addWorksheet('Synthèse', summaryRows);
 
@@ -562,6 +570,20 @@ export default function App() {
         Heures: Number(issue.hours || 0),
       }));
       addWorksheet('Bench_Tickets', benchIssueRows);
+
+      const benchCommentThemeRows = (benchCommentSummary?.themes || []).map((theme) => ({
+        Thème: theme.label,
+        Heures: Number(theme.hours || 0),
+        'Nombre de saisies': Number(theme.occurrences || 0),
+      }));
+      addWorksheet('Bench_Commentaires_Themes', benchCommentThemeRows);
+
+      const benchCommentHighlightsRows = (benchCommentSummary?.highlights || []).map((entry) => ({
+        Ticket: entry.issueKey,
+        Heures: Number(entry.hours || 0),
+        Commentaire: entry.comment,
+      }));
+      addWorksheet('Bench_Commentaires_Exemples', benchCommentHighlightsRows);
 
       const leavesTypeRows = (leavesDetails.issueTypeTotals || []).map((entry) => ({
         Type: entry.issueType,
@@ -924,9 +946,65 @@ export default function App() {
                     <span>
                       Sous-tâches : {benchDetails.subtaskCount} ({formatNumber(benchDetails.subtaskHours)} h)
                     </span>
+                    <span>
+                      Commentaires bench : {benchDetails.commentCount || 0} ({formatNumber(benchDetails.commentHours || 0)} h)
+                    </span>
                   </div>
 
                   <div className="detail-grid">
+                    <article className="detail-block">
+                      <h4>🧠 Résumé Codex de vos commentaires bench</h4>
+                      {!benchCommentSummary ? (
+                        <p>Résumé indisponible pour le moment.</p>
+                      ) : (
+                        <>
+                          <p className="hint">{benchCommentSummary.message}</p>
+                          <p className="hint">
+                            Source du résumé : {benchCommentSummary.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local'}
+                          </p>
+                          <p className="hint">
+                            Saisies commentées : {benchCommentSummary.commentedWorklogs || 0}
+                            {' · '}
+                            Temps couvert : {formatNumber(benchCommentSummary.commentedHours || 0)} h
+                          </p>
+                          {!benchCommentSummary.themes?.length ? (
+                            <p>Aucun thème clair détecté.</p>
+                          ) : (
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Thème détecté</th>
+                                  <th scope="col">Heures</th>
+                                  <th scope="col">Saisies</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {benchCommentSummary.themes.map((theme) => (
+                                  <tr key={theme.label}>
+                                    <td>{theme.label}</td>
+                                    <td>{formatNumber(theme.hours)}</td>
+                                    <td>{theme.occurrences}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          {!benchCommentSummary.highlights?.length ? null : (
+                            <>
+                              <h5>Exemples représentatifs</h5>
+                              <ul className="hint-list">
+                                {benchCommentSummary.highlights.map((entry, index) => (
+                                  <li key={`${entry.issueKey}-${index}`}>
+                                    <strong>{entry.issueKey}</strong> ({formatNumber(entry.hours)} h): {entry.comment}
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </article>
+
                     <article className="detail-block">
                       <h4>📚 Répartition par type d'issue (bench)</h4>
                       {!benchDetails.issueTypeTotals?.length ? (

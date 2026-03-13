@@ -665,6 +665,19 @@ label {
   color: #4f6341;
 }
 
+.detail-block h5 {
+  margin: 10px 0 6px;
+  color: #5a6d4e;
+}
+
+.hint-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: #556853;
+}
+
 .neon-table {
   width: 100%;
   border-collapse: collapse;

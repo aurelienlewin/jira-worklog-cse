@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.4] - 2026-03-13 12:50 CET
+
+### Changed
+
+- Reworked bench comments summary to use `codex exec` first (French narrative synthesis), with automatic local fallback only if Codex output is unavailable.
+- Added visible source indicator in the UI (`Codex` vs `mode secours`) for bench comment summaries.
+- Added bench comment summary source and dedicated comment sheets in Excel export.
+
 ## [1.16.3] - 2026-03-13 12:45 CET
 
 ### Changed
