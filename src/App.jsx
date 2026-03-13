@@ -1393,63 +1393,59 @@ export default function App() {
                       )}
                     </article>
 
-                    <details className="detail-block detail-disclosure">
-                      <summary>
-                        <span className="summary-title">🧩 Sous-tâches bench</span>
-                        <span className="summary-meta">{benchDetails.subtasks.length} lignes</span>
-                        <span className="summary-state" aria-hidden="true" />
-                      </summary>
-                      <div className="disclosure-content">
-                        {!benchDetails.subtasks?.length ? (
-                          <p>Aucune sous-tâche bench avec heures en 2025.</p>
-                        ) : (
-                          <>
-                            <p className="hint">
-                              Affichage de {visibleBenchSubtasks.length} sur {benchDetails.subtasks.length} lignes.
-                            </p>
-                            <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches bench">
-                              <table className="neon-table">
-                                <thead>
-                                  <tr>
-                                    <th scope="col">Ticket</th>
-                                    <th scope="col">Type</th>
-                                    <th scope="col">Parent</th>
-                                    <th scope="col">Heures</th>
+                    {benchDetails.subtasks?.length ? (
+                      <details className="detail-block detail-disclosure">
+                        <summary>
+                          <span className="summary-title">🧩 Sous-tâches bench</span>
+                          <span className="summary-meta">{benchDetails.subtasks.length} lignes</span>
+                          <span className="summary-state" aria-hidden="true" />
+                        </summary>
+                        <div className="disclosure-content">
+                          <p className="hint">
+                            Affichage de {visibleBenchSubtasks.length} sur {benchDetails.subtasks.length} lignes.
+                          </p>
+                          <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches bench">
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Ticket</th>
+                                  <th scope="col">Type</th>
+                                  <th scope="col">Parent</th>
+                                  <th scope="col">Heures</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visibleBenchSubtasks.map((issue) => (
+                                  <tr key={issue.issueKey}>
+                                    <td>
+                                      <strong>{issue.issueKey}</strong>
+                                      <br />
+                                      <span>{issue.summary}</span>
+                                    </td>
+                                    <td>{issue.issueType}</td>
+                                    <td>
+                                      {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                    </td>
+                                    <td>{formatNumber(issue.hours)}</td>
                                   </tr>
-                                </thead>
-                                <tbody>
-                                  {visibleBenchSubtasks.map((issue) => (
-                                    <tr key={issue.issueKey}>
-                                      <td>
-                                        <strong>{issue.issueKey}</strong>
-                                        <br />
-                                        <span>{issue.summary}</span>
-                                      </td>
-                                      <td>{issue.issueType}</td>
-                                      <td>
-                                        {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
-                                      </td>
-                                      <td>{formatNumber(issue.hours)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {visibleBenchSubtasks.length < benchDetails.subtasks.length ? (
-                              <button
-                                type="button"
-                                className="neon-btn ghost compact"
-                                onClick={() =>
-                                  setBenchSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, benchDetails.subtasks.length))
-                                }
-                              >
-                                Afficher {nextChunkSize(visibleBenchSubtasks.length, benchDetails.subtasks.length)} lignes de plus
-                              </button>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    </details>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {visibleBenchSubtasks.length < benchDetails.subtasks.length ? (
+                            <button
+                              type="button"
+                              className="neon-btn ghost compact"
+                              onClick={() =>
+                                setBenchSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, benchDetails.subtasks.length))
+                              }
+                            >
+                              Afficher {nextChunkSize(visibleBenchSubtasks.length, benchDetails.subtasks.length)} lignes de plus
+                            </button>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
 
                   <details className="detail-block detail-disclosure">
@@ -1563,72 +1559,68 @@ export default function App() {
                       )}
                     </article>
 
-                    <details className="detail-block detail-disclosure">
-                      <summary>
-                        <span className="summary-title">🧩 Sous-tâches congés</span>
-                        <span className="summary-meta">{leavesDetails.subtasks.length} lignes</span>
-                        <span className="summary-state" aria-hidden="true" />
-                      </summary>
-                      <div className="disclosure-content">
-                        {!leavesDetails.subtasks?.length ? (
-                          <p>Aucune sous-tâche congés avec heures en 2025.</p>
-                        ) : (
-                          <>
-                            <p className="hint">
-                              {leavesDetails.subtaskCount} sous-tâches, soit {formatNumber(leavesDetails.subtaskHours)} h.
-                            </p>
-                            <p className="hint">
-                              Affichage de {visibleLeavesSubtasks.length} sur {leavesDetails.subtasks.length} lignes.
-                            </p>
-                            <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches congés">
-                              <table className="neon-table">
-                                <thead>
-                                  <tr>
-                                    <th scope="col">Ticket</th>
-                                    <th scope="col">Type</th>
-                                    <th scope="col">Parent</th>
-                                    <th scope="col">Heures</th>
-                                    <th scope="col">Jours</th>
+                    {leavesDetails.subtasks?.length ? (
+                      <details className="detail-block detail-disclosure">
+                        <summary>
+                          <span className="summary-title">🧩 Sous-tâches congés</span>
+                          <span className="summary-meta">{leavesDetails.subtasks.length} lignes</span>
+                          <span className="summary-state" aria-hidden="true" />
+                        </summary>
+                        <div className="disclosure-content">
+                          <p className="hint">
+                            {leavesDetails.subtaskCount} sous-tâches, soit {formatNumber(leavesDetails.subtaskHours)} h.
+                          </p>
+                          <p className="hint">
+                            Affichage de {visibleLeavesSubtasks.length} sur {leavesDetails.subtasks.length} lignes.
+                          </p>
+                          <div className="table-wrap" tabIndex="0" aria-label="Sous-tâches congés">
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Ticket</th>
+                                  <th scope="col">Type</th>
+                                  <th scope="col">Parent</th>
+                                  <th scope="col">Heures</th>
+                                  <th scope="col">Jours</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visibleLeavesSubtasks.map((issue) => (
+                                  <tr key={issue.issueKey}>
+                                    <td>
+                                      {getIssueBrowseUrl(issue.issueKey) ? (
+                                        <a href={getIssueBrowseUrl(issue.issueKey)} target="_blank" rel="noreferrer">
+                                          {issue.issueKey}
+                                        </a>
+                                      ) : (
+                                        <span>{issue.issueKey}</span>
+                                      )}
+                                      <br />
+                                      <span>{issue.summary}</span>
+                                    </td>
+                                    <td>{issue.issueType}</td>
+                                    <td>{issue.parentKey || '-'}</td>
+                                    <td>{formatNumber(issue.hours)}</td>
+                                    <td>{formatNumber(issue.days)}</td>
                                   </tr>
-                                </thead>
-                                <tbody>
-                                  {visibleLeavesSubtasks.map((issue) => (
-                                    <tr key={issue.issueKey}>
-                                      <td>
-                                        {getIssueBrowseUrl(issue.issueKey) ? (
-                                          <a href={getIssueBrowseUrl(issue.issueKey)} target="_blank" rel="noreferrer">
-                                            {issue.issueKey}
-                                          </a>
-                                        ) : (
-                                          <span>{issue.issueKey}</span>
-                                        )}
-                                        <br />
-                                        <span>{issue.summary}</span>
-                                      </td>
-                                      <td>{issue.issueType}</td>
-                                      <td>{issue.parentKey || '-'}</td>
-                                      <td>{formatNumber(issue.hours)}</td>
-                                      <td>{formatNumber(issue.days)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {visibleLeavesSubtasks.length < leavesDetails.subtasks.length ? (
-                              <button
-                                type="button"
-                                className="neon-btn ghost compact"
-                                onClick={() =>
-                                  setLeavesSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, leavesDetails.subtasks.length))
-                                }
-                              >
-                                Afficher {nextChunkSize(visibleLeavesSubtasks.length, leavesDetails.subtasks.length)} lignes de plus
-                              </button>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    </details>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {visibleLeavesSubtasks.length < leavesDetails.subtasks.length ? (
+                            <button
+                              type="button"
+                              className="neon-btn ghost compact"
+                              onClick={() =>
+                                setLeavesSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, leavesDetails.subtasks.length))
+                              }
+                            >
+                              Afficher {nextChunkSize(visibleLeavesSubtasks.length, leavesDetails.subtasks.length)} lignes de plus
+                            </button>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
 
                   <details className="detail-block detail-disclosure">

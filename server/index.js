@@ -1318,6 +1318,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
     }
 
     if (skipIssue) continue;
+    if (issueSeconds <= 0) continue;
 
     totalSeconds += issueSeconds;
     issues.push({
