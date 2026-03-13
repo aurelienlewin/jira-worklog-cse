@@ -8,6 +8,7 @@ const CODEX_GUIDE_URL =
 const TOKEN_SESSION_KEY = 'jira_worklog_cse_token';
 const LEAVES_ISSUE_KEY = 'ZLH-1';
 const BENCH_PROJECT_KEY = 'WAROE';
+const BENCH_DETAIL_PROJECT_KEYS = [BENCH_PROJECT_KEY];
 
 const STEPS = [
   { id: 'pat', title: "🔑 Créer votre clé d'accès Jira" },
@@ -80,6 +81,37 @@ export default function App() {
     };
   }, [report, leaves]);
 
+  const benchDetails = useMemo(() => {
+    return report?.detailedProjects?.find((project) => project.projectKey === BENCH_PROJECT_KEY) || null;
+  }, [report]);
+
+  const leavesDetails = useMemo(() => {
+    const issues = leaves?.issues || [];
+    const subtasks = [];
+
+    for (const issue of issues) {
+      if (issue.isSubtask || issue.parentKey) {
+        subtasks.push(issue);
+      }
+    }
+
+    const issueTypeTotals =
+      Array.isArray(leaves?.issueTypeTotals) && leaves.issueTypeTotals.length
+        ? leaves.issueTypeTotals
+        : [];
+
+    const subtaskSeconds = subtasks.reduce((sum, issue) => sum + Number(issue.seconds || 0), 0);
+    const subtaskCount = Number(leaves?.subtaskCount ?? subtasks.length);
+    const subtaskHours = Number(leaves?.subtaskHours ?? Number((subtaskSeconds / 3600).toFixed(2)));
+
+    return {
+      issueTypeTotals,
+      subtasks,
+      subtaskCount,
+      subtaskHours,
+    };
+  }, [leaves]);
+
   function addToast(message, tone = 'info') {
     setToasts((prev) => [...prev, makeToast(message, tone)]);
   }
@@ -119,7 +151,10 @@ export default function App() {
     setBusyAction('report');
     try {
       const [hoursData, leavesData] = await Promise.all([
-        postJson('/api/jira/report', { token: activeToken }),
+        postJson('/api/jira/report', {
+          token: activeToken,
+          detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
+        }),
         postJson('/api/jira/leaves', {
           token: activeToken,
           issueKey: LEAVES_ISSUE_KEY,
@@ -470,6 +505,120 @@ export default function App() {
             </section>
 
             <section className="glass feedback-card reveal">
+              <h3>🧱 Détail du bench ({BENCH_PROJECT_KEY})</h3>
+              {!benchDetails ? (
+                <p>
+                  Aucun détail bench pour le moment. Lancez le chargement 2025 pour récupérer
+                  les sous-tâches et la répartition par type d'issue.
+                </p>
+              ) : (
+                <>
+                  <div className="meta-row">
+                    <span>Tickets bench : {benchDetails.issueCount}</span>
+                    <span>Total bench : {formatNumber(benchDetails.issueHours)} h</span>
+                    <span>
+                      Sous-tâches : {benchDetails.subtaskCount} ({formatNumber(benchDetails.subtaskHours)} h)
+                    </span>
+                  </div>
+
+                  <div className="detail-grid">
+                    <article className="detail-block">
+                      <h4>📚 Répartition par type d'issue (bench)</h4>
+                      {!benchDetails.issueTypeTotals?.length ? (
+                        <p>Pas de répartition disponible.</p>
+                      ) : (
+                        <table className="neon-table">
+                          <thead>
+                            <tr>
+                              <th>Type d'issue</th>
+                              <th>Heures</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {benchDetails.issueTypeTotals.map((entry) => (
+                              <tr key={entry.issueType}>
+                                <td>{entry.issueType}</td>
+                                <td>{formatNumber(entry.hours)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </article>
+
+                    <article className="detail-block">
+                      <h4>🧩 Sous-tâches bench</h4>
+                      {!benchDetails.subtasks?.length ? (
+                        <p>Aucune sous-tâche bench avec heures en 2025.</p>
+                      ) : (
+                        <table className="neon-table">
+                          <thead>
+                            <tr>
+                              <th>Ticket</th>
+                              <th>Type</th>
+                              <th>Parent</th>
+                              <th>Heures</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {benchDetails.subtasks.map((issue) => (
+                              <tr key={issue.issueKey}>
+                                <td>
+                                  <strong>{issue.issueKey}</strong>
+                                  <br />
+                                  <span>{issue.summary}</span>
+                                </td>
+                                <td>{issue.issueType}</td>
+                                <td>
+                                  {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                </td>
+                                <td>{formatNumber(issue.hours)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </article>
+                  </div>
+
+                  <article className="detail-block">
+                    <h4>🗂️ Tous les tickets bench (tous types)</h4>
+                    {!benchDetails.issues?.length ? (
+                      <p>Aucun ticket bench avec heures en 2025.</p>
+                    ) : (
+                      <table className="neon-table">
+                        <thead>
+                          <tr>
+                            <th>Ticket</th>
+                            <th>Type</th>
+                            <th>Parent</th>
+                            <th>Heures</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {benchDetails.issues.map((issue) => (
+                            <tr key={issue.issueKey}>
+                              <td>
+                                <strong>{issue.issueKey}</strong>
+                                <br />
+                                <span>{issue.summary}</span>
+                              </td>
+                              <td>{issue.issueType}</td>
+                              <td>
+                                {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                              </td>
+                              <td>{formatNumber(issue.hours)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </article>
+                </>
+              )}
+            </section>
+
+            <section className="glass feedback-card reveal">
               <h3>🌴 Suivi des congés annuels ({LEAVES_ISSUE_KEY})</h3>
               {!leaves?.issues?.length ? (
                 <p>Pas de congés chargés pour le moment.</p>
@@ -483,6 +632,75 @@ export default function App() {
                       Jours ({leaves.workingDayHours}h) : {formatNumber(leaves.totalDays)}
                     </span>
                   </div>
+
+                  <div className="detail-grid">
+                    <article className="detail-block">
+                      <h4>📚 Répartition par type d'issue (congés)</h4>
+                      {!leavesDetails.issueTypeTotals?.length ? (
+                        <p>Pas de répartition disponible.</p>
+                      ) : (
+                        <table className="neon-table">
+                          <thead>
+                            <tr>
+                              <th>Type d'issue</th>
+                              <th>Heures</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {leavesDetails.issueTypeTotals.map((entry) => (
+                              <tr key={entry.issueType}>
+                                <td>{entry.issueType}</td>
+                                <td>{formatNumber(entry.hours)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </article>
+
+                    <article className="detail-block">
+                      <h4>🧩 Sous-tâches congés</h4>
+                      {!leavesDetails.subtasks?.length ? (
+                        <p>Aucune sous-tâche congés avec heures en 2025.</p>
+                      ) : (
+                        <>
+                          <p className="hint">
+                            {leavesDetails.subtaskCount} sous-tâches, soit {formatNumber(leavesDetails.subtaskHours)} h.
+                          </p>
+                          <table className="neon-table">
+                            <thead>
+                              <tr>
+                                <th>Ticket</th>
+                                <th>Type</th>
+                                <th>Parent</th>
+                                <th>Heures</th>
+                                <th>Jours</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {leavesDetails.subtasks.map((issue) => (
+                                <tr key={issue.issueKey}>
+                                  <td>
+                                    <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
+                                      {issue.issueKey}
+                                    </a>
+                                    <br />
+                                    <span>{issue.summary}</span>
+                                  </td>
+                                  <td>{issue.issueType}</td>
+                                  <td>{issue.parentKey || '-'}</td>
+                                  <td>{formatNumber(issue.hours)}</td>
+                                  <td>{formatNumber(issue.days)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+                    </article>
+                  </div>
+
+                  <h4>🗂️ Tous les tickets congés (tous types)</h4>
                   <table className="neon-table">
                     <thead>
                       <tr>

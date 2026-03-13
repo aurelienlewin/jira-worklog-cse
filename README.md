@@ -9,6 +9,7 @@ Objectif:
 - verifier la connexion,
 - afficher les heures travaillees en 2025 par projet Jira, avec total final,
 - afficher les conges 2025 et un resume clair des indicateurs utiles.
+- afficher des panneaux de detail pour le bench (`WAROE`) et les conges, avec sous-taches et repartition par type d'issue (tous types).
 
 ## Interface
 
@@ -28,6 +29,8 @@ Le rapport inclut:
 - les heures totales par projet,
 - un suivi des conges annuels base sur l'issue `ZLH-1`.
 - des panneaux de synthese: total heures travaillees, total heures/jours de conges, taux WAROE et taux d'utilisation.
+- un panneau bench `WAROE`: repartition par type d'issue, sous-taches, liste complete des tickets.
+- un panneau conges `ZLH-1`: repartition par type d'issue, sous-taches, liste complete des tickets.
 
 ## Prerequis
 

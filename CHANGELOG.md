@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-03-13 12:09 CET
+
+### Added
+
+- Added a dedicated bench details panel for `WAROE` with issue type totals (all issue types), subtask hours/details, and full issue list with hours.
+- Added richer annual leaves details in API response and UI with issue type totals (all issue types), subtask totals/details, and full issue list with hours/days.
+
+### Changed
+
+- Frontend now requests report details specifically for `WAROE` via `detailedProjectKeys`.
+
 ## [1.10.0] - 2026-03-13 12:25 CET
 
 ### Changed

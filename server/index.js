@@ -543,6 +543,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
     const issueType = issue.fields?.issuetype?.name || 'Issue';
     const status = issue.fields?.status?.name || 'Inconnu';
     const parentKey = issue.fields?.parent?.key || null;
+    const isSubtask = Boolean(issue.fields?.issuetype?.subtask || parentKey);
 
     let wlStart = 0;
     const wlMax = 1000;
@@ -575,6 +576,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
       issueType,
       status,
       parentKey,
+      isSubtask,
       seconds: issueSeconds,
       hours: Number((issueSeconds / 3600).toFixed(2)),
       days: Number((issueSeconds / 3600 / WORKING_DAY_HOURS).toFixed(2)),
@@ -582,6 +584,20 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
   }
 
   issues.sort((a, b) => b.seconds - a.seconds);
+  const issueTypeTotalsMap = new Map();
+  for (const issue of issues) {
+    const current = issueTypeTotalsMap.get(issue.issueType) || 0;
+    issueTypeTotalsMap.set(issue.issueType, current + issue.seconds);
+  }
+  const issueTypeTotals = [...issueTypeTotalsMap.entries()]
+    .map(([issueType, seconds]) => ({
+      issueType,
+      hours: Number((seconds / 3600).toFixed(2)),
+    }))
+    .sort((a, b) => b.hours - a.hours);
+  const subtasks = issues.filter((issue) => issue.isSubtask);
+  const subtaskSeconds = subtasks.reduce((sum, issue) => sum + issue.seconds, 0);
+
   const totalHours = Number((totalSeconds / 3600).toFixed(2));
   const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
 
@@ -591,6 +607,9 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
     worklogCount: keptWorklogs,
     totalHours,
     totalDays,
+    issueTypeTotals,
+    subtaskCount: subtasks.length,
+    subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
     workingDayHours: WORKING_DAY_HOURS,
     issues,
   };
