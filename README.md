@@ -8,7 +8,7 @@ Objectif:
 - configurer Codex + la connexion Jira automatiquement,
 - verifier la connexion,
 - afficher les heures travaillees en 2025 par projet Jira, avec total final,
-- afficher le detail des sous-taches pour OSFO et ROEMO.
+- afficher le detail complet des issues (tous types) pour OSFO et ROEMO.
 
 ## Interface
 
@@ -25,7 +25,7 @@ Le theme visuel est volontairement clair et apaisant (printemps, lever de soleil
 Le rapport inclut:
 
 - les heures totales par projet,
-- un detail dedie des sous-taches pour `OSFO` et `ROEMO`.
+- un detail dedie de toutes les issues (stories, tasks, bugs, sous-taches, etc.) pour `OSFO` et `ROEMO`.
 
 ## Prerequis
 

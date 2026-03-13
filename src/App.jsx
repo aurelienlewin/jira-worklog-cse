@@ -205,7 +205,7 @@ export default function App() {
         <h2>Etape 4: afficher vos heures 2025</h2>
         <p>
           Cette action calcule vos heures de travail 2025 par projet Jira,
-          puis affiche le total global et le detail des sous-taches pour OSFO et ROEMO.
+          puis affiche le total global et le detail complet des issues pour OSFO et ROEMO.
         </p>
         <button
           type="button"
@@ -321,7 +321,7 @@ export default function App() {
         </section>
 
         <section className="glass feedback-card reveal">
-          <h3>Detail des sous-taches pour OSFO et ROEMO</h3>
+          <h3>Detail complet des issues pour OSFO et ROEMO</h3>
           {!report?.detailedProjects?.length ? (
             <p>Pas de detail disponible pour le moment.</p>
           ) : (
@@ -332,31 +332,42 @@ export default function App() {
                     {detail.projectKey} - {detail.projectName}
                   </h4>
                   <p className="hint">
-                    Sous-taches: {detail.subtaskCount} | Total sous-taches: {hours(detail.subtaskHours)} h
+                    Issues: {detail.issueCount} | Total issues: {hours(detail.issueHours)} h
+                    {' '}| Sous-taches: {detail.subtaskCount} ({hours(detail.subtaskHours)} h)
                   </p>
-                  {!detail.subtasks?.length ? (
-                    <p>Aucune sous-tache avec heures sur 2025.</p>
+                  {!!detail.issueTypeTotals?.length ? (
+                    <p className="hint">
+                      Repartition par type:{' '}
+                      {detail.issueTypeTotals
+                        .map((entry) => `${entry.issueType}: ${hours(entry.hours)} h`)
+                        .join(' | ')}
+                    </p>
+                  ) : null}
+                  {!detail.issues?.length ? (
+                    <p>Aucune issue avec heures sur 2025.</p>
                   ) : (
                     <table className="neon-table">
                       <thead>
                         <tr>
-                          <th>Sous-tache</th>
+                          <th>Issue</th>
+                          <th>Type</th>
                           <th>Parent</th>
                           <th>Heures</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.subtasks.map((subtask) => (
-                          <tr key={subtask.issueKey}>
+                        {detail.issues.map((issue) => (
+                          <tr key={issue.issueKey}>
                             <td>
-                              <strong>{subtask.issueKey}</strong>
+                              <strong>{issue.issueKey}</strong>
                               <br />
-                              <span>{subtask.summary}</span>
+                              <span>{issue.summary}</span>
                             </td>
+                            <td>{issue.issueType}</td>
                             <td>
-                              {subtask.parentKey ? `${subtask.parentKey} - ${subtask.parentSummary}` : '-'}
+                              {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
                             </td>
-                            <td>{hours(subtask.hours)}</td>
+                            <td>{hours(issue.hours)}</td>
                           </tr>
                         ))}
                       </tbody>

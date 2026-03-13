@@ -453,23 +453,41 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   const detailedProjects = [...detailedByProject.values()]
     .map((project) => {
       const allDetailedIssues = [...project.issues.values()].sort((a, b) => b.seconds - a.seconds);
-      const subtasks = allDetailedIssues
-        .filter((issue) => issue.isSubtask && issue.seconds > 0)
+      const issues = allDetailedIssues
+        .filter((issue) => issue.seconds > 0)
         .map((issue) => ({
           issueKey: issue.issueKey,
           summary: issue.issueSummary,
           parentKey: issue.parentKey,
           parentSummary: issue.parentSummary,
           issueType: issue.issueTypeName,
+          isSubtask: issue.isSubtask,
           seconds: issue.seconds,
           hours: Number((issue.seconds / 3600).toFixed(2)),
         }));
+      const issueSeconds = issues.reduce((sum, issue) => sum + issue.seconds, 0);
+      const subtasks = issues.filter((issue) => issue.isSubtask);
       const subtaskSeconds = subtasks.reduce((sum, issue) => sum + issue.seconds, 0);
+      const issueTypeTotalsMap = new Map();
+      for (const issue of issues) {
+        const current = issueTypeTotalsMap.get(issue.issueType) || 0;
+        issueTypeTotalsMap.set(issue.issueType, current + issue.seconds);
+      }
+      const issueTypeTotals = [...issueTypeTotalsMap.entries()]
+        .map(([issueType, seconds]) => ({
+          issueType,
+          hours: Number((seconds / 3600).toFixed(2)),
+        }))
+        .sort((a, b) => b.hours - a.hours);
       return {
         projectKey: project.projectKey,
         projectName: project.projectName,
+        issueCount: issues.length,
+        issueHours: Number((issueSeconds / 3600).toFixed(2)),
+        issueTypeTotals,
         subtaskCount: subtasks.length,
         subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
+        issues,
         subtasks,
       };
     })
@@ -480,8 +498,12 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
     detailedProjects.push({
       projectKey,
       projectName: foundProject?.projectName || projectKey,
+      issueCount: 0,
+      issueHours: 0,
+      issueTypeTotals: [],
       subtaskCount: 0,
       subtaskHours: 0,
+      issues: [],
       subtasks: [],
     });
   }

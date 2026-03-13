@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-03-13 12:08 CET
+
+### Changed
+
+- Detailed OSFO/ROEMO report now displays all issue types, not only subtasks.
+- Added per-project issue type totals and full issue-level lines in the UI.
+
 ## [1.7.0] - 2026-03-13 11:58 CET
 
 ### Changed
