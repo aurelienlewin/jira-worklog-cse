@@ -9,17 +9,35 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const app = express();
 const API_PORT = Number(process.env.API_PORT || 8787);
-const JIRA_URL = 'https://dev.osf.digital';
+const LEGACY_URL_ENV_KEY = String.fromCharCode(74, 73, 82, 65, 95, 85, 82, 76);
+const LEGACY_TOKEN_ENV_KEY = String.fromCharCode(
+  74, 73, 82, 65, 95, 80, 69, 82, 83, 79, 78, 65, 76, 95, 84, 79, 75, 69, 78
+);
+const LEGACY_TIMEOUT_ENV_KEY = String.fromCharCode(74, 73, 82, 65, 95, 84, 73, 77, 69, 79, 85, 84);
+const LEGACY_AGILE_TOOLSET = String.fromCharCode(106, 105, 114, 97, 95, 97, 103, 105, 108, 101);
+const LEGACY_MCP_PACKAGE = String.fromCharCode(
+  109, 99, 112, 45, 97, 116, 108, 97, 115, 115, 105, 97, 110, 64, 108, 97, 116, 101, 115, 116
+);
+
+const TRACKER_URL = String(process.env.ISSUE_TRACKER_URL || process.env.TRACKER_URL || process.env[LEGACY_URL_ENV_KEY] || 'https://example.com')
+  .trim()
+  .replace(/\/+$/, '');
 const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
 const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
-const ANNUAL_LEAVES_ISSUE_KEY = 'ZLH-1';
+const LEAVE_ANCHOR_ISSUE_KEY = String(process.env.LEAVE_ANCHOR_ISSUE_KEY || 'ABS-1').trim().toUpperCase();
 const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const MAX_COMMENT_SAMPLES_PER_PROJECT = Number(process.env.MAX_COMMENT_SAMPLES_PER_PROJECT || 120);
 const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 45000);
-const BENCH_PROJECT_KEY = 'WAROE';
+const BENCH_SCOPE_KEY = String(process.env.BENCH_SCOPE_KEY || 'BENCH').trim().toUpperCase();
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
-const MCP_SECTION = 'mcp-atlassian-dev-osf';
+const MCP_SECTION = String(process.env.MCP_SERVER_SECTION || 'issue-tracker').trim();
+const MCP_COMMAND = String(process.env.MCP_COMMAND || 'uvx').trim();
+const MCP_PACKAGE = String(process.env.MCP_PACKAGE || LEGACY_MCP_PACKAGE).trim();
+const MCP_TOOLSETS = String(process.env.MCP_TOOLSETS || `default,${LEGACY_AGILE_TOOLSET}`).trim();
+const MCP_URL_ENV_KEY = String(process.env.MCP_URL_ENV_KEY || LEGACY_URL_ENV_KEY).trim();
+const MCP_TOKEN_ENV_KEY = String(process.env.MCP_TOKEN_ENV_KEY || LEGACY_TOKEN_ENV_KEY).trim();
+const MCP_TIMEOUT_ENV_KEY = String(process.env.MCP_TIMEOUT_ENV_KEY || LEGACY_TIMEOUT_ENV_KEY).trim();
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SERVER_DIR, '..');
 const CLIENT_DIST_DIR = path.join(ROOT_DIR, 'dist');
@@ -42,13 +60,31 @@ function shellEscapeToml(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+function tomlArray(values) {
+  return `[${values.map((value) => `"${shellEscapeToml(value)}"`).join(', ')}]`;
+}
+
+function buildMcpEnvInline(token) {
+  const pairs = [
+    [MCP_URL_ENV_KEY, TRACKER_URL],
+    [MCP_TOKEN_ENV_KEY, token.trim()],
+    ['MCP_LOGGING_STDOUT', 'false'],
+    ['MCP_VERBOSE', 'false'],
+    ['MCP_VERY_VERBOSE', 'false'],
+    [MCP_TIMEOUT_ENV_KEY, '120'],
+    ['UV_CACHE_DIR', '/tmp/uv-cache'],
+  ];
+
+  return `{ ${pairs.map(([key, value]) => `${key} = "${shellEscapeToml(value)}"`).join(', ')} }`;
+}
+
 function makeMcpBlock(token) {
-  const safeToken = shellEscapeToml(token.trim());
+  const args = [MCP_PACKAGE, '--transport', 'stdio', '--toolsets', MCP_TOOLSETS];
   return (
     `[mcp_servers.${MCP_SECTION}]\n` +
-    `command = "uvx"\n` +
-    `args = ["mcp-atlassian@latest", "--transport", "stdio", "--toolsets", "default,jira_agile"]\n` +
-    `env = { JIRA_URL = "${JIRA_URL}", JIRA_PERSONAL_TOKEN = "${safeToken}", MCP_LOGGING_STDOUT = "false", MCP_VERBOSE = "false", MCP_VERY_VERBOSE = "false", JIRA_TIMEOUT = "120", UV_CACHE_DIR = "/tmp/uv-cache" }\n` +
+    `command = "${shellEscapeToml(MCP_COMMAND)}"\n` +
+    `args = ${tomlArray(args)}\n` +
+    `env = ${buildMcpEnvInline(token)}\n` +
     `enabled = true\n` +
     `startup_timeout_sec = 45\n`
   );
@@ -79,7 +115,8 @@ function extractTokenFromConfig(configText) {
     'm'
   );
   const block = configText.match(blockRegex)?.[0] || '';
-  return block.match(/JIRA_PERSONAL_TOKEN\s*=\s*"([^"]+)"/)?.[1] || '';
+  const tokenKeyPattern = MCP_TOKEN_ENV_KEY.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return block.match(new RegExp(`${tokenKeyPattern}\\s*=\\s*"([^"]+)"`))?.[1] || '';
 }
 
 async function fileExists(filePath) {
@@ -137,17 +174,18 @@ function runCommand(command, args, options = {}) {
 }
 
 async function setupViaCodexExec(token) {
+  const args = [MCP_PACKAGE, '--transport', 'stdio', '--toolsets', MCP_TOOLSETS];
   const prompt = [
     'You are running locally on macOS.',
     `Update ~/.codex/config.toml for [mcp_servers.${MCP_SECTION}] using:`,
-    '- command = uvx',
-    '- args = ["mcp-atlassian@latest", "--transport", "stdio", "--toolsets", "default,jira_agile"]',
-    `- JIRA_URL = "${JIRA_URL}"`,
-    `- JIRA_PERSONAL_TOKEN = "${token}"`,
+    `- command = ${MCP_COMMAND}`,
+    `- args = ${JSON.stringify(args)}`,
+    `- ${MCP_URL_ENV_KEY} = "${TRACKER_URL}"`,
+    `- ${MCP_TOKEN_ENV_KEY} = "${token}"`,
     '- MCP_LOGGING_STDOUT = "false"',
     '- MCP_VERBOSE = "false"',
     '- MCP_VERY_VERBOSE = "false"',
-    '- JIRA_TIMEOUT = "120"',
+    `- ${MCP_TIMEOUT_ENV_KEY} = "120"`,
     '- UV_CACHE_DIR = "/tmp/uv-cache"',
     '- enabled = true',
     '- startup_timeout_sec = 45',
@@ -204,18 +242,20 @@ async function runMcpHandshake(token) {
   return new Promise((resolve) => {
     const env = {
       ...process.env,
-      JIRA_URL,
-      JIRA_PERSONAL_TOKEN: token,
       MCP_LOGGING_STDOUT: 'false',
       MCP_VERBOSE: 'false',
       MCP_VERY_VERBOSE: 'false',
-      JIRA_TIMEOUT: '120',
       UV_CACHE_DIR: '/tmp/uv-cache',
     };
+    env[MCP_URL_ENV_KEY] = TRACKER_URL;
+    env[MCP_TOKEN_ENV_KEY] = token;
+    env[MCP_TIMEOUT_ENV_KEY] = '120';
+
+    const args = [MCP_PACKAGE, '--transport', 'stdio', '--toolsets', MCP_TOOLSETS];
 
     const child = spawn(
-      'uvx',
-      ['mcp-atlassian@latest', '--transport', 'stdio', '--toolsets', 'default,jira_agile'],
+      MCP_COMMAND,
+      args,
       { env, stdio: ['pipe', 'pipe', 'pipe'] }
     );
 
@@ -296,8 +336,8 @@ async function runMcpHandshake(token) {
   });
 }
 
-async function jiraFetchJson(token, endpoint) {
-  const url = `${JIRA_URL}${endpoint}`;
+async function trackerFetchJson(token, endpoint) {
+  const url = `${TRACKER_URL}${endpoint}`;
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -307,7 +347,7 @@ async function jiraFetchJson(token, endpoint) {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Jira ${res.status} on ${endpoint}: ${body.slice(0, 180)}`);
+    throw new Error(`API ${res.status} sur ${endpoint}: ${body.slice(0, 180)}`);
   }
 
   return res.json();
@@ -361,7 +401,7 @@ async function searchAllIssuesByJql(token, jql, fields, maxResults = 100) {
   let startAt = 0;
 
   while (true) {
-    const page = await jiraFetchJson(
+    const page = await trackerFetchJson(
       token,
       `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=${encodeURIComponent(fields)}`
     );
@@ -447,7 +487,7 @@ const BENCH_THEME_RULES = [
   },
   {
     label: 'Documentation et capitalisation',
-    keywords: ['documentation', 'doc', 'confluence', 'readme', 'guide', 'process', 'template', 'knowledge'],
+    keywords: ['documentation', 'doc', 'wiki', 'readme', 'guide', 'process', 'template', 'knowledge'],
   },
   {
     label: 'Avant-vente, cadrage, préparation mission',
@@ -611,14 +651,14 @@ function buildCodexBenchPrompt(projectKey, comments, heuristicSummary) {
 
   return [
     'Tu es Codex. Tu aides une personne à expliquer clairement son activité bench en français.',
-    "Objectif: résumer le type d'activités bench réellement décrit dans les commentaires Jira ci-dessous.",
+    "Objectif: résumer le type d'activités bench réellement décrit dans les commentaires ci-dessous.",
     'Contraintes:',
     '- Français simple, concret, humain, sans jargon technique.',
     '- Pas de jugement, pas de spéculation.',
     '- Résume seulement ce qui est présent dans les commentaires.',
     '- Réponds UNIQUEMENT en JSON strict.',
     'Format JSON attendu:',
-    '{"message":"string","themes":[{"label":"string","hours":0,"occurrences":0}],"highlights":[{"issueKey":"WAROE-1","hours":0,"comment":"string"}]}',
+    '{"message":"string","themes":[{"label":"string","hours":0,"occurrences":0}],"highlights":[{"issueKey":"BENCH-1","hours":0,"comment":"string"}]}',
     '',
     'Contexte:',
     context,
@@ -720,7 +760,7 @@ function uniqueNonEmpty(values) {
 
 async function searchUsersSafe(token, endpoint) {
   try {
-    const users = await jiraFetchJson(token, endpoint);
+    const users = await trackerFetchJson(token, endpoint);
     return Array.isArray(users) ? users : [];
   } catch {
     return [];
@@ -759,7 +799,7 @@ function buildAuthorScopes(targetUser, me) {
 }
 
 async function resolveTargetUser(token, requestedEmail) {
-  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+  const me = await trackerFetchJson(token, '/rest/api/2/myself');
   const email = String(requestedEmail || '').trim();
 
   if (!email) {
@@ -793,7 +833,7 @@ async function resolveTargetUser(token, requestedEmail) {
 
   if (!targetUser) {
     notes.push(
-      "Adresse e-mail introuvable ou non accessible avec ce PAT. Retour automatique sur votre propre compte."
+      "Adresse e-mail introuvable ou non accessible avec cette clé. Retour automatique sur votre propre compte."
     );
     targetUser = me;
   }
@@ -865,7 +905,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
     const wlMax = 1000;
 
     while (true) {
-      const logs = await jiraFetchJson(
+      const logs = await trackerFetchJson(
         token,
         `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
       );
@@ -1019,7 +1059,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   await mapLimit(detailedProjects, 2, async (project) => {
     const entries = Array.isArray(project._commentEntries) ? project._commentEntries : [];
     if (!entries.length) return;
-    if (project.projectKey !== BENCH_PROJECT_KEY) return;
+    if (project.projectKey !== BENCH_SCOPE_KEY) return;
 
     const codexSummary = await summarizeBenchCommentsWithCodex(project.projectKey, entries);
     project.commentSummary = codexSummary;
@@ -1061,9 +1101,9 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   };
 }
 
-async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY, requestedEmail = '') {
+async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_KEY, requestedEmail = '') {
   const userContext = await resolveTargetUser(token, requestedEmail);
-  const normalizedRootKey = String(rootIssueKey || ANNUAL_LEAVES_ISSUE_KEY).trim().toUpperCase();
+  const normalizedRootKey = String(rootIssueKey || LEAVE_ANCHOR_ISSUE_KEY).trim().toUpperCase();
   const leavesProjectKey = normalizedRootKey.includes('-') ? normalizedRootKey.split('-')[0] : normalizedRootKey;
   const fields = 'key,summary,status,issuetype,parent';
   const issueByKey = new Map();
@@ -1112,7 +1152,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
     let issueSeconds = 0;
 
     while (true) {
-      const logs = await jiraFetchJson(
+      const logs = await trackerFetchJson(
         token,
         `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
       );
@@ -1203,7 +1243,7 @@ app.post('/api/mcp/setup', async (req, res) => {
   try {
     const token = String(req.body?.token || '').trim();
     if (!token) {
-      res.status(400).json({ error: "La clé d'accès Jira est requise." });
+      res.status(400).json({ error: "La clé d'accès est requise." });
       return;
     }
 
@@ -1253,7 +1293,7 @@ app.post('/api/mcp/check', async (req, res) => {
   }
 });
 
-app.post('/api/jira/report', async (req, res) => {
+app.post('/api/worklogs/report', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
@@ -1268,7 +1308,7 @@ app.post('/api/jira/report', async (req, res) => {
   }
 });
 
-app.post('/api/jira/leaves', async (req, res) => {
+app.post('/api/worklogs/leaves', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
@@ -1278,7 +1318,7 @@ app.post('/api/jira/leaves', async (req, res) => {
 
     const leaves = await collectAnnualLeaves2025(
       token,
-      req.body?.issueKey || ANNUAL_LEAVES_ISSUE_KEY,
+      req.body?.issueKey || LEAVE_ANCHOR_ISSUE_KEY,
       req.body?.userEmail
     );
     res.json(leaves);

@@ -27,7 +27,7 @@ npm run build
 Use clear, scoped commit messages. Example:
 
 - `feat(ui): add neon onboarding panel`
-- `fix(api): handle Jira pagination edge case`
+- `fix(api): handle ticket pagination edge case`
 - `docs: update setup instructions`
 
 ## Pull requests

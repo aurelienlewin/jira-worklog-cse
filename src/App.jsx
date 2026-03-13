@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const PAT_URL =
-  'https://dev.osf.digital/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens';
-const CODEX_GUIDE_URL =
-  'https://id.atlassian.com/login/select-account?application=confluence&continue=https%3A%2F%2Fosfdigital.atlassian.net%2Fwiki%2Fspaces%2FIAAP%2Fpages%2F6043435230%2FAllAi%2BCodex%2BUser%2BGuide%3Fmkt_tok%3DNDg0LU1YTy0zOTkAAAGefh8Jrty25p-c38C-t4pwUdS261E6ns3cANvUTrp4QEph9O6kERleTJKLyMs4JWc-EJqlqkBAQTpmQNUOxM3I3NE-k0E_OrUim1IsiSjQSXBC&login_hint=not%3Aaurelien.lewin%40osf.digital&redirectCount=1';
+const TOKEN_HELP_URL = String(import.meta.env.VITE_TOKEN_HELP_URL || 'https://example.com/token').trim();
+const SETUP_GUIDE_URL = String(import.meta.env.VITE_SETUP_GUIDE_URL || 'https://example.com/guide').trim();
+const ISSUE_BROWSE_BASE_URL = String(import.meta.env.VITE_ISSUE_BROWSE_BASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
 
-const TOKEN_SESSION_KEY = 'jira_worklog_cse_token';
-const USER_EMAIL_SESSION_KEY = 'jira_worklog_cse_user_email';
-const LEAVES_ISSUE_KEY = 'ZLH-1';
-const LEAVES_SCOPE_LABEL = 'ZLH-*';
-const BENCH_PROJECT_KEY = 'WAROE';
-const BENCH_DETAIL_PROJECT_KEYS = [BENCH_PROJECT_KEY];
+const TOKEN_SESSION_KEY = 'worklog_cse_token';
+const USER_EMAIL_SESSION_KEY = 'worklog_cse_user_email';
+const LEAVE_ANCHOR_ISSUE_KEY = 'ABS-1';
+const LEAVE_SCOPE_LABEL = 'ABS-*';
+const BENCH_SCOPE_KEY = 'BENCH';
+const BENCH_DETAIL_PROJECT_KEYS = [BENCH_SCOPE_KEY];
 const KOFI_URL = 'https://ko-fi.com/aurelienlewin';
 
 const STEPS = [
-  { id: 'pat', title: "🔑 Créer votre clé d'accès Jira" },
-  { id: 'guide', title: '📘 Lire le guide Codex' },
+  { id: 'pat', title: "🔑 Créer votre clé d'accès" },
+  { id: 'guide', title: '📘 Lire le guide de configuration' },
   { id: 'setup', title: '⚙️ Lancer la configuration' },
   { id: 'report', title: '📊 Voir heures et congés 2025' },
 ];
@@ -102,6 +103,11 @@ function nextChunkSize(visible, total) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getIssueBrowseUrl(issueKey) {
+  if (!ISSUE_BROWSE_BASE_URL || !issueKey) return '';
+  return `${ISSUE_BROWSE_BASE_URL}/browse/${encodeURIComponent(String(issueKey))}`;
 }
 
 function prefersReducedMotion() {
@@ -205,22 +211,22 @@ export default function App() {
     const workedHours = Number(report?.totalHours || 0);
     const leavesHours = Number(leaves?.totalHours || 0);
     const leavesDays = Number(leaves?.totalDays || 0);
-    const waroeProject = report?.projects?.find((project) => project.projectKey === BENCH_PROJECT_KEY);
-    const waroeHours = Number(waroeProject?.hours || 0);
-    const waroeRate = workedHours > 0 ? (waroeHours / workedHours) * 100 : 0;
-    const utilizationRate = Math.max(0, 100 - waroeRate);
+    const benchProject = report?.projects?.find((project) => project.projectKey === BENCH_SCOPE_KEY);
+    const benchHours = Number(benchProject?.hours || 0);
+    const benchRate = workedHours > 0 ? (benchHours / workedHours) * 100 : 0;
+    const utilizationRate = Math.max(0, 100 - benchRate);
     return {
       workedHours,
       leavesHours,
       leavesDays,
-      waroeHours,
-      waroeRate,
+      benchHours,
+      benchRate,
       utilizationRate,
     };
   }, [report, leaves]);
 
   const benchDetails = useMemo(() => {
-    return report?.detailedProjects?.find((project) => project.projectKey === BENCH_PROJECT_KEY) || null;
+    return report?.detailedProjects?.find((project) => project.projectKey === BENCH_SCOPE_KEY) || null;
   }, [report]);
 
   const leavesDetails = useMemo(() => {
@@ -274,14 +280,14 @@ export default function App() {
     return [
       {
         title: 'Utilisation',
-        subtitle: '100 % - taux WAROE',
+        subtitle: '100 % - taux bench',
         value: summary.utilizationRate,
         tone: 'leaf',
       },
       {
-        title: 'Part WAROE',
-        subtitle: `${formatNumber(summary.waroeHours)} h sur vos heures 2025`,
-        value: summary.waroeRate,
+        title: 'Part bench',
+        subtitle: `${formatNumber(summary.benchHours)} h sur vos heures 2025`,
+        value: summary.benchRate,
         tone: 'sun',
       },
       {
@@ -313,7 +319,7 @@ export default function App() {
 
     let message = 'Analyse de vos données.';
     if (delegated) {
-      message = 'Analyse d’un autre compte (selon les droits du PAT).';
+      message = "Analyse d’un autre compte (selon les droits de votre clé d'accès).";
     } else if (fallback) {
       message = "L'e-mail demandé n'a pas été trouvé: affichage de votre compte.";
     }
@@ -485,24 +491,24 @@ export default function App() {
     const activeToken = String(tokenOverride || token || '').trim();
     const activeUserEmail = String(targetEmail || '').trim();
     if (!activeToken) {
-      addToast("⚠️ Merci d'abord de renseigner votre clé d'accès Jira.", 'error');
+      addToast("⚠️ Merci d'abord de renseigner votre clé d'accès.", 'error');
       return;
     }
 
     setBusyAction('report');
-    setReportProgress({ active: true, value: 6, label: 'Connexion à Jira en cours...' });
+    setReportProgress({ active: true, value: 6, label: 'Connexion au service en cours...' });
     try {
       setReportProgress({ active: true, value: 22, label: 'Collecte des heures travaillées 2025...' });
-      const hoursData = await postJsonWithRetry('/api/jira/report', {
+      const hoursData = await postJsonWithRetry('/api/worklogs/report', {
         token: activeToken,
         detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
         userEmail: activeUserEmail || undefined,
       }, { label: 'Chargement des heures 2025', attempts: 3 });
 
-      setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVES_SCOPE_LABEL}...` });
-      const leavesData = await postJsonWithRetry('/api/jira/leaves', {
+      setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVE_SCOPE_LABEL}...` });
+      const leavesData = await postJsonWithRetry('/api/worklogs/leaves', {
         token: activeToken,
-        issueKey: LEAVES_ISSUE_KEY,
+        issueKey: LEAVE_ANCHOR_ISSUE_KEY,
         userEmail: activeUserEmail || undefined,
       }, { label: 'Chargement des congés et absences 2025', attempts: 3 });
 
@@ -517,7 +523,7 @@ export default function App() {
       }
       if (activeUserEmail && (hoursData?.user?.mode === 'fallback_current' || leavesData?.user?.mode === 'fallback_current')) {
         addToast(
-          "ℹ️ L'e-mail saisi n'a pas pu être résolu avec ce PAT. Les données affichées correspondent à votre compte.",
+          "ℹ️ L'e-mail saisi n'a pas pu être résolu avec cette clé. Les données affichées correspondent à votre compte.",
           'warn'
         );
       }
@@ -526,12 +532,12 @@ export default function App() {
         'success'
       );
       addToast(
-        `🌴 Congés/absences chargés (${LEAVES_SCOPE_LABEL}) : ${formatNumber(leavesData.totalHours)} h, soit ${formatNumber(leavesData.totalDays)} jours.`,
+        `🌴 Congés/absences chargés (${LEAVE_SCOPE_LABEL}) : ${formatNumber(leavesData.totalHours)} h, soit ${formatNumber(leavesData.totalDays)} jours.`,
         'success'
       );
       if (!Number(leavesData.totalHours || 0)) {
         addToast(
-          `ℹ️ Aucun temps trouvé sur ${LEAVES_SCOPE_LABEL} pour 2025 avec ce PAT.`,
+          `ℹ️ Aucun temps trouvé sur ${LEAVE_SCOPE_LABEL} pour 2025 avec cette clé.`,
           'warn'
         );
       }
@@ -551,7 +557,7 @@ export default function App() {
   async function runSetup() {
     const activeToken = String(token || '').trim();
     if (!activeToken) {
-      addToast("⚠️ Merci de coller votre clé d'accès Jira pour continuer.", 'error');
+      addToast("⚠️ Merci de coller votre clé d'accès pour continuer.", 'error');
       return;
     }
 
@@ -721,7 +727,7 @@ export default function App() {
         throw new Error("Le module d'export Excel n'a pas pu être chargé correctement.");
       }
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'Jira Worklog CSE';
+      workbook.creator = 'Worklog CSE';
       workbook.created = new Date();
 
       function addWorksheet(sheetName, rows) {
@@ -763,8 +769,8 @@ export default function App() {
         { Indicateur: 'Total heures travaillées 2025', Valeur: summary.workedHours },
         { Indicateur: 'Total heures congés/absences 2025', Valeur: summary.leavesHours },
         { Indicateur: 'Total jours congés/absences 2025', Valeur: summary.leavesDays },
-        { Indicateur: 'Heures WAROE', Valeur: summary.waroeHours },
-        { Indicateur: 'Taux WAROE (%)', Valeur: Number(summary.waroeRate.toFixed(2)) },
+        { Indicateur: 'Heures BENCH', Valeur: summary.benchHours },
+        { Indicateur: 'Taux bench (%)', Valeur: Number(summary.benchRate.toFixed(2)) },
         { Indicateur: "Taux d'utilisation (%)", Valeur: Number(summary.utilizationRate.toFixed(2)) },
         {
           Indicateur: 'Résumé commentaires bench',
@@ -840,7 +846,7 @@ export default function App() {
       const downloadUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `jira-worklog-cse-${safeDate}.xlsx`;
+      link.download = `worklog-cse-${safeDate}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -858,15 +864,15 @@ export default function App() {
     if (step === 0) {
       return (
         <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
-          <h2>🔑 Étape 1 : créer votre clé d'accès Jira</h2>
+          <h2>🔑 Étape 1 : créer votre clé d'accès</h2>
           <p>
             Cliquez sur le bouton ci-dessous, créez une clé d'accès personnelle,
             puis revenez ici pour la coller.
           </p>
-          <a className="neon-btn" href={PAT_URL} target="_blank" rel="noreferrer">
-            Ouvrir la page de création de la clé
+          <a className="neon-btn" href={TOKEN_HELP_URL} target="_blank" rel="noreferrer">
+            Ouvrir la page de création du jeton
           </a>
-          <p className="hint">Astuce : donnez un nom clair, par exemple "Jira Worklog CSE".</p>
+          <p className="hint">Astuce : donnez un nom clair, par exemple "Worklog CSE".</p>
         </section>
       );
     }
@@ -874,12 +880,12 @@ export default function App() {
     if (step === 1) {
       return (
         <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
-          <h2>📘 Étape 2 : lire le guide Codex</h2>
+          <h2>📘 Étape 2 : lire le guide</h2>
           <p>
-            Ouvrez le guide interne et suivez les prérequis.
+            Ouvrez le guide de configuration et suivez les prérequis.
             Quand c'est fait, passez à l'étape suivante.
           </p>
-          <a className="neon-btn secondary" href={CODEX_GUIDE_URL} target="_blank" rel="noreferrer">
+          <a className="neon-btn secondary" href={SETUP_GUIDE_URL} target="_blank" rel="noreferrer">
             Ouvrir le guide
           </a>
         </section>
@@ -890,7 +896,7 @@ export default function App() {
       return (
         <section ref={stepContentRef} tabIndex="-1" className="glass step-card reveal">
           <h2>⚙️ Étape 3 : lancer la configuration</h2>
-          <label htmlFor="pat-token">Collez votre clé d'accès Jira</label>
+          <label htmlFor="pat-token">Collez votre clé d'accès</label>
           <textarea
             id="pat-token"
             rows="4"
@@ -904,13 +910,13 @@ export default function App() {
             id="user-email"
             type="email"
             className="text-input"
-            placeholder="prenom.nom@osf.digital"
+            placeholder="prenom.nom@exemple.fr"
             autoComplete="email"
             value={targetEmail}
             onChange={(event) => setTargetEmail(event.target.value)}
           />
           <p className="hint">
-            Cas d'usage : laissez vide pour vos propres données, ou saisissez un autre e-mail si votre PAT a les droits.
+            Cas d'usage : laissez vide pour vos propres données, ou saisissez un autre e-mail si votre clé a les droits.
           </p>
 
           <div className="actions">
@@ -941,7 +947,7 @@ export default function App() {
         <h2>📊 Étape 4 : vos heures et vos congés 2025</h2>
         <p>
           Cette action charge votre bilan 2025 :
-          temps de travail par projet, puis congés et absences sur {LEAVES_SCOPE_LABEL}.
+          temps de travail par projet, puis congés et absences sur {LEAVE_SCOPE_LABEL}.
         </p>
         {targetEmail ? (
           <p className="hint">Utilisateur ciblé : {targetEmail}</p>
@@ -976,10 +982,10 @@ export default function App() {
       <div className="bg-grid" aria-hidden="true" />
 
       <header className="hero glass reveal">
-        <p className="badge">Jira Worklog CSE</p>
+        <p className="badge">Worklog CSE</p>
         <h1>Heures travaillées en 2025</h1>
         <p className="hero-sub">
-          Suivez les étapes pour connecter Jira, puis consulter vos heures, congés et indicateurs 2025.
+          Suivez les étapes pour connecter votre espace de travail, puis consulter vos heures, congés et indicateurs 2025.
         </p>
         <p className="status">{headerStatus}</p>
       </header>
@@ -1122,16 +1128,16 @@ export default function App() {
                   <small>Soit {formatNumber(summary.leavesDays)} jours.</small>
                 </article>
                 <article className="summary-card">
-                  <h4>🧱 Taux WAROE</h4>
-                  <p>{formatPercent(summary.waroeRate)}</p>
+                  <h4>🧱 Taux bench</h4>
+                  <p>{formatPercent(summary.benchRate)}</p>
                   <small>
-                    Calculé depuis {BENCH_PROJECT_KEY} ({formatNumber(summary.waroeHours)} h).
+                    Calculé depuis {BENCH_SCOPE_KEY} ({formatNumber(summary.benchHours)} h).
                   </small>
                 </article>
                 <article className="summary-card">
                   <h4>✅ Taux d'utilisation</h4>
                   <p>{formatPercent(summary.utilizationRate)}</p>
-                  <small>Formule : 100 % - taux WAROE.</small>
+                  <small>Formule : 100 % - taux bench.</small>
                 </article>
               </div>
               <div className="actions">
@@ -1189,7 +1195,7 @@ export default function App() {
             </section>
 
             <section className={`glass feedback-card reveal${isBenchReady ? '' : ' section-pending'}`} aria-busy={!isBenchReady}>
-              <h3>🧱 Détail du bench ({BENCH_PROJECT_KEY})</h3>
+              <h3>🧱 Détail du bench ({BENCH_SCOPE_KEY})</h3>
               {!isBenchReady ? (
                 <p className="section-state">⏳ En attente du chargement des données bench.</p>
               ) : null}
@@ -1415,7 +1421,7 @@ export default function App() {
             </section>
 
             <section className={`glass feedback-card reveal${isLeavesReady ? '' : ' section-pending'}`} aria-busy={!isLeavesReady}>
-              <h3>🌴 Suivi des congés et absences ({LEAVES_SCOPE_LABEL})</h3>
+              <h3>🌴 Suivi des congés et absences ({LEAVE_SCOPE_LABEL})</h3>
               {!isLeavesReady ? (
                 <p className="section-state">⏳ En attente du chargement des congés et absences.</p>
               ) : null}
@@ -1424,7 +1430,7 @@ export default function App() {
               ) : (
                 <>
                   <div className="meta-row">
-                    <span>Tickets ZLH : {leaves.issueCount}</span>
+                    <span>Tickets congés : {leaves.issueCount}</span>
                     <span>Temps saisis retenus : {leaves.worklogCount}</span>
                     <span>Total : {formatNumber(leaves.totalHours)} h</span>
                     <span>
@@ -1433,7 +1439,7 @@ export default function App() {
                   </div>
                   {leaves?.discovery?.usedFallbackScope ? (
                     <p className="hint">
-                      Certains filtres Jira n'étaient pas disponibles. Un mode de secours a été utilisé.
+                      Certains filtres n'étaient pas disponibles. Un mode de secours a été utilisé.
                     </p>
                   ) : null}
 
@@ -1496,9 +1502,13 @@ export default function App() {
                                   {visibleLeavesSubtasks.map((issue) => (
                                     <tr key={issue.issueKey}>
                                       <td>
-                                        <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
-                                          {issue.issueKey}
-                                        </a>
+                                        {getIssueBrowseUrl(issue.issueKey) ? (
+                                          <a href={getIssueBrowseUrl(issue.issueKey)} target="_blank" rel="noreferrer">
+                                            {issue.issueKey}
+                                          </a>
+                                        ) : (
+                                          <span>{issue.issueKey}</span>
+                                        )}
                                         <br />
                                         <span>{issue.summary}</span>
                                       </td>
@@ -1554,9 +1564,13 @@ export default function App() {
                             {visibleLeavesIssues.map((issue) => (
                               <tr key={issue.issueKey}>
                                 <td>
-                                  <a href={`https://dev.osf.digital/browse/${issue.issueKey}`} target="_blank" rel="noreferrer">
-                                    {issue.issueKey}
-                                  </a>
+                                  {getIssueBrowseUrl(issue.issueKey) ? (
+                                    <a href={getIssueBrowseUrl(issue.issueKey)} target="_blank" rel="noreferrer">
+                                      {issue.issueKey}
+                                    </a>
+                                  ) : (
+                                    <span>{issue.issueKey}</span>
+                                  )}
                                   <br />
                                   <span>{issue.summary}</span>
                                 </td>

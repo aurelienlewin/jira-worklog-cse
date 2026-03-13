@@ -6,7 +6,7 @@
     "src/**",
     "node_modules/**",
     ".git/**",
-    ".mcp-atlassian-venv/**",
+    ".mcp-*-venv/**",
     "README.md",
     "CHANGELOG.md",
     "package-lock.json"

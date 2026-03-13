@@ -1,52 +1,41 @@
-# Jira Worklog CSE
+# Worklog CSE
 
-Assistant local (React + Node.js) pensé pour les utilisatrices et utilisateurs non techniques.
+Application locale (React + Node.js) pour visualiser simplement les heures 2025, les congés/absences, et exporter un fichier Excel lisible.
 
-## Objectif
+## Ce que fait l'outil
 
-- vous guider pas à pas pour créer un token d'accès personnel Jira,
-- configurer Codex + la connexion Jira automatiquement,
-- vérifier la connexion,
-- afficher les heures travaillées en 2025 par projet Jira, avec total final,
-- afficher les congés 2025 et un résumé clair des indicateurs utiles,
-- afficher des panneaux de détail pour le bench (`WAROE`) et les congés, avec sous-tâches et répartition par type d'issue (tous types),
-- afficher les congés/absences sur tout le scope `ZLH-*` (ex : `ZLH-1`, `ZLH-2`, `ZLH-4`) quand du temps est saisi sur votre utilisateur,
-- permettre de cibler un autre utilisateur via son e-mail (si votre PAT a les droits),
-- exporter un fichier Excel clair avec les résumés, calculs et tableaux utiles.
-- proposer une interface plus accessible (focus visibles, navigation clavier, structure sémantique).
+- guide pas à pas pour saisir votre clé d'accès,
+- configure automatiquement votre connecteur MCP,
+- vérifie la connexion,
+- calcule les heures travaillées par projet,
+- calcule les heures/jours de congés et absences,
+- affiche un taux bench et un taux d'utilisation,
+- propose des détails (types d'issue, sous-tâches, tickets complets),
+- résume les commentaires bench (avec Codex + fallback local),
+- exporte un `.xlsx` prêt à partager.
 
-## Interface
+## Parcours utilisateur
 
-Le parcours est organisé en 4 étapes claires :
+1. Créer un jeton personnel.
+2. Lire le guide de configuration.
+3. Coller la clé + lancer la configuration.
+4. Charger les données 2025 et exporter.
 
-1. Créer le PAT Jira
-2. Lire le guide Codex
-3. Configurer et vérifier la connexion
-4. Charger le rapport des heures et congés 2025
+L'interface est en français, orientée non technique, avec:
 
-L'application affiche des états de chargement explicites et des toasts cumulatifs dismissables.
-Un indicateur de progression en temps réel est affiché pendant la collecte des données Jira.
-Le thème visuel est volontairement clair et apaisant (printemps, lever de soleil, ambiance campagne).
-La clé d'accès est mémorisée dans la session navigateur pour reprendre automatiquement sur l'étape 4.
-L'e-mail cible (optionnel) est aussi mémorisé dans la session pour reprendre la même analyse.
-Un footer « Soutenir ce projet » est visible dans l'application avec accès direct à Ko-fi.
-L'application intègre une base SSR en production (HTML pré-rendu + hydratation côté client).
-
-Le rapport inclut :
-
-- les heures totales par projet,
-- un suivi des congés/absences basé sur tout le scope `ZLH-*` pour votre utilisateur,
-- des panneaux de synthèse : total heures travaillées, total heures/jours de congés, taux WAROE et taux d'utilisation,
-- un dashboard de cercles de progression pour visualiser rapidement les ratios clés,
-- un panneau bench `WAROE` : répartition par type d'issue, sous-tâches, liste complète des tickets,
-- un panneau congés `ZLH-*` : répartition par type d'issue, sous-tâches, liste complète des tickets.
+- stepper clair,
+- états de chargement visibles,
+- toasts flottants cumulables et dismissables,
+- navigation clavier,
+- focus visibles,
+- rendu SSR en production.
 
 ## Prérequis
 
 - Node.js 20+
 - npm
-- Accès à Jira `https://dev.osf.digital`
 - Codex CLI installé localement
+- Accès à votre instance de suivi de tickets
 
 ## Lancer en local
 
@@ -55,48 +44,57 @@ npm install
 npm run dev
 ```
 
-- Frontend : `http://localhost:5173`
-- API : `http://127.0.0.1:8787`
+- Frontend: `http://localhost:5173`
+- API: `http://127.0.0.1:8787`
+
+## Variables recommandées
+
+Copier `.env.example` vers `.env.local` puis adapter les valeurs:
+
+```bash
+cp .env.example .env.local
+
+# Frontend
+VITE_TOKEN_HELP_URL="https://example.com/token"
+VITE_SETUP_GUIDE_URL="https://example.com/guide"
+VITE_ISSUE_BROWSE_BASE_URL="https://example.com"
+
+# API
+ISSUE_TRACKER_URL="https://example.com"
+BENCH_SCOPE_KEY="BENCH"
+LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
+MCP_SERVER_SECTION="issue-tracker"
+```
 
 ## Scripts
 
-- `npm run dev` : démarre API + frontend en parallèle
-- `npm run build` : build frontend + bundle SSR serveur
-- `npm start` : démarre l'API et sert le frontend (SSR si build disponible)
-
-## Fonctionnement du setup MCP
-
-Pendant l'étape de configuration, l'app tente :
-
-1. `codex exec` pour mettre à jour `~/.codex/config.toml`
-2. fallback local automatique si nécessaire
-3. vérification automatique de la connexion pour confirmer que tout fonctionne
+- `npm run dev`: démarre API + frontend
+- `npm run build`: build frontend + bundle SSR serveur
+- `npm start`: démarre l'API et sert le frontend
 
 ## Open Source
 
-- Licence : [LICENSE](./LICENSE)
-- Code de conduite : [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
-- Contribuer : [CONTRIBUTING.md](./CONTRIBUTING.md)
-- Sécurité : [SECURITY.md](./SECURITY.md)
-- Historique des changements : [CHANGELOG.md](./CHANGELOG.md)
+- Licence: [LICENSE](./LICENSE)
+- Code de conduite: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- Contribution: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Sécurité: [SECURITY.md](./SECURITY.md)
+- Historique: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Soutenir ce projet
 
-Ce projet est né un vendredi 13, à l'heure où la ville bâille encore.
-Un signe de chance, peut-être, ou juste le bon moment pour faire quelque chose d'utile.
+Ce projet est né un vendredi 13, dans un matin encore calme.
+Un clin d'œil à la chance, peut-être. Ou juste le bon moment.
 
-Il a été construit sur du temps perso, sur un ordinateur perso, avec des tokens Codex persos.
-Un geste simple : enlever un peu de poids des épaules, remettre de la clarté dans les chiffres,
-et garder un cap quand la mer n'est pas très calme.
+Il a été construit sur mon temps perso, sur mon ordinateur perso,
+avec mes propres tokens Codex.
 
-Il y a des périodes où les couloirs changent de musique.
-On ne dit pas toujours les choses, mais on les sent.
-Alors ce projet avance comme une lampe de poche dans la brume : pas pour faire du bruit,
-juste pour éclairer quelques pas de plus.
+L'idée était simple: apporter un peu d'air, un peu d'ordre,
+un outil qui aide sans bruit, quand les périodes deviennent plus rudes.
 
-J'y ai croisé des personnes solides, fines, lumineuses.
-Cette page est une façon de leur dire merci, sans grand discours.
+On ne dit pas toujours tout à voix haute.
+Parfois, on se contente d'être là, de faire quelque chose d'utile,
+et de laisser une lumière douce pour celles et ceux qui continuent la route.
 
-Si tu veux soutenir ce travail :
+Si ce travail vous aide, vous pouvez soutenir le projet ici:
 
-- Ko-fi : https://ko-fi.com/aurelienlewin
+- Ko-fi: https://ko-fi.com/aurelienlewin
