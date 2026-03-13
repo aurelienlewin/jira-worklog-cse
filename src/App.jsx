@@ -6,10 +6,12 @@ const CODEX_GUIDE_URL =
   'https://id.atlassian.com/login/select-account?application=confluence&continue=https%3A%2F%2Fosfdigital.atlassian.net%2Fwiki%2Fspaces%2FIAAP%2Fpages%2F6043435230%2FAllAi%2BCodex%2BUser%2BGuide%3Fmkt_tok%3DNDg0LU1YTy0zOTkAAAGefh8Jrty25p-c38C-t4pwUdS261E6ns3cANvUTrp4QEph9O6kERleTJKLyMs4JWc-EJqlqkBAQTpmQNUOxM3I3NE-k0E_OrUim1IsiSjQSXBC&login_hint=not%3Aaurelien.lewin%40osf.digital&redirectCount=1';
 
 const TOKEN_SESSION_KEY = 'jira_worklog_cse_token';
+const USER_EMAIL_SESSION_KEY = 'jira_worklog_cse_user_email';
 const LEAVES_ISSUE_KEY = 'ZLH-1';
 const LEAVES_SCOPE_LABEL = 'ZLH-*';
 const BENCH_PROJECT_KEY = 'WAROE';
 const BENCH_DETAIL_PROJECT_KEYS = [BENCH_PROJECT_KEY];
+const KOFI_URL = 'https://ko-fi.com/aurelienlewin';
 
 const STEPS = [
   { id: 'pat', title: "🔑 Créer votre clé d'accès Jira" },
@@ -67,11 +69,13 @@ function ProgressCircle({ value, title, subtitle, tone = 'leaf' }) {
 export default function App() {
   const [step, setStep] = useState(0);
   const [token, setToken] = useState('');
+  const [targetEmail, setTargetEmail] = useState('');
   const [connection, setConnection] = useState(null);
   const [report, setReport] = useState(null);
   const [leaves, setLeaves] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [busyAction, setBusyAction] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
   const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
 
   const isBusy = Boolean(busyAction);
@@ -198,6 +202,7 @@ export default function App() {
 
   async function loadYearlyData(tokenOverride) {
     const activeToken = String(tokenOverride || token || '').trim();
+    const activeUserEmail = String(targetEmail || '').trim();
     if (!activeToken) {
       addToast("⚠️ Merci d'abord de renseigner votre clé d'accès Jira.", 'error');
       return;
@@ -210,12 +215,14 @@ export default function App() {
       const hoursData = await postJson('/api/jira/report', {
         token: activeToken,
         detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
+        userEmail: activeUserEmail || undefined,
       });
 
       setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVES_SCOPE_LABEL}...` });
       const leavesData = await postJson('/api/jira/leaves', {
         token: activeToken,
         issueKey: LEAVES_ISSUE_KEY,
+        userEmail: activeUserEmail || undefined,
       });
 
       setReportProgress({ active: true, value: 91, label: 'Calcul des indicateurs en cours...' });
@@ -223,6 +230,10 @@ export default function App() {
       setReport(hoursData);
       setLeaves(leavesData);
       setReportProgress({ active: true, value: 100, label: 'Données prêtes.' });
+      const userLabel = leavesData?.user?.resolvedEmail || hoursData?.user?.resolvedEmail || activeUserEmail || '';
+      if (userLabel) {
+        addToast(`👤 Analyse réalisée pour: ${userLabel}`, 'info');
+      }
       addToast(
         `✅ Rapport chargé : ${formatNumber(hoursData.totalHours)} h de travail en 2025.`,
         'success'
@@ -304,6 +315,8 @@ export default function App() {
 
   useEffect(() => {
     const savedToken = sessionStorage.getItem(TOKEN_SESSION_KEY) || '';
+    const savedUserEmail = sessionStorage.getItem(USER_EMAIL_SESSION_KEY) || '';
+    setTargetEmail(savedUserEmail);
     if (!savedToken) return;
 
     setToken(savedToken);
@@ -321,6 +334,15 @@ export default function App() {
     sessionStorage.setItem(TOKEN_SESSION_KEY, value);
   }, [token]);
 
+  useEffect(() => {
+    const value = String(targetEmail || '').trim();
+    if (!value) {
+      sessionStorage.removeItem(USER_EMAIL_SESSION_KEY);
+      return;
+    }
+    sessionStorage.setItem(USER_EMAIL_SESSION_KEY, value);
+  }, [targetEmail]);
+
   function nextStep() {
     if (!canGoNext) return;
     setStep((prev) => prev + 1);
@@ -333,12 +355,114 @@ export default function App() {
 
   function clearTokenAndRestart() {
     setToken('');
+    setTargetEmail('');
     setConnection(null);
     setReport(null);
     setLeaves(null);
     sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    sessionStorage.removeItem(USER_EMAIL_SESSION_KEY);
     setStep(0);
     addToast('ℹ️ Clé supprimée. Vous pouvez en saisir une nouvelle.', 'info');
+  }
+
+  async function exportExcel() {
+    if (!report || !leaves) {
+      addToast('⚠️ Chargez d abord les données 2025 avant d exporter.', 'warn');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      addToast('📦 Préparation du fichier Excel...', 'info');
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+      const analysedUser =
+        leaves?.user?.resolvedEmail ||
+        report?.user?.resolvedEmail ||
+        String(targetEmail || '').trim() ||
+        'Mon compte';
+      const generatedAt = new Date().toLocaleString('fr-FR');
+
+      const summaryRows = [
+        { Indicateur: 'Date d export', Valeur: generatedAt },
+        { Indicateur: 'Utilisateur analysé', Valeur: analysedUser },
+        { Indicateur: 'Total heures travaillées 2025', Valeur: summary.workedHours },
+        { Indicateur: 'Total heures congés/absences 2025', Valeur: summary.leavesHours },
+        { Indicateur: 'Total jours congés/absences 2025', Valeur: summary.leavesDays },
+        { Indicateur: 'Heures WAROE', Valeur: summary.waroeHours },
+        { Indicateur: 'Taux WAROE (%)', Valeur: Number(summary.waroeRate.toFixed(2)) },
+        { Indicateur: "Taux d'utilisation (%)", Valeur: Number(summary.utilizationRate.toFixed(2)) },
+      ];
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Synthese');
+
+      const projectRows = (report.projects || []).map((project) => ({
+        Projet: project.projectKey,
+        Nom: project.projectName,
+        Heures: Number(project.hours || 0),
+      }));
+      projectRows.push({
+        Projet: 'TOTAL',
+        Nom: 'Activités 2025',
+        Heures: Number(report.totalHours || 0),
+      });
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(projectRows), 'Projets_2025');
+
+      const benchTypeRows = (benchDetails?.issueTypeTotals || []).map((entry) => ({
+        Type: entry.issueType,
+        Heures: Number(entry.hours || 0),
+      }));
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(benchTypeRows.length ? benchTypeRows : [{ Type: 'Aucune donnée', Heures: 0 }]),
+        'Bench_Types'
+      );
+
+      const benchIssueRows = (benchDetails?.issues || []).map((issue) => ({
+        Ticket: issue.issueKey,
+        Type: issue.issueType,
+        Parent: issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '',
+        Resume: issue.summary,
+        Heures: Number(issue.hours || 0),
+      }));
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(benchIssueRows.length ? benchIssueRows : [{ Ticket: 'Aucune donnée' }]),
+        'Bench_Tickets'
+      );
+
+      const leavesTypeRows = (leavesDetails.issueTypeTotals || []).map((entry) => ({
+        Type: entry.issueType,
+        Heures: Number(entry.hours || 0),
+      }));
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(leavesTypeRows.length ? leavesTypeRows : [{ Type: 'Aucune donnée', Heures: 0 }]),
+        'Conges_Types'
+      );
+
+      const leavesRows = (leaves.issues || []).map((issue) => ({
+        Ticket: issue.issueKey,
+        Type: issue.issueType,
+        Statut: issue.status,
+        Parent: issue.parentKey || '',
+        Resume: issue.summary,
+        Heures: Number(issue.hours || 0),
+        Jours: Number(issue.days || 0),
+      }));
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(leavesRows.length ? leavesRows : [{ Ticket: 'Aucune donnée' }]),
+        'Conges_Tickets'
+      );
+
+      const safeDate = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `jira-worklog-cse-${safeDate}.xlsx`);
+      addToast('✅ Fichier Excel exporté avec succès.', 'success');
+    } catch (err) {
+      addToast(err.message || "❌ Impossible d'exporter le fichier Excel.", 'error');
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   function renderStepContent() {
@@ -386,6 +510,18 @@ export default function App() {
             value={token}
             onChange={(event) => setToken(event.target.value)}
           />
+          <label htmlFor="user-email">Adresse e-mail à analyser (optionnel)</label>
+          <input
+            id="user-email"
+            type="email"
+            className="text-input"
+            placeholder="prenom.nom@osf.digital"
+            value={targetEmail}
+            onChange={(event) => setTargetEmail(event.target.value)}
+          />
+          <p className="hint">
+            Cas d usage: laissez vide pour vos propres données, ou saisissez un autre e-mail si votre PAT a les droits.
+          </p>
 
           <div className="actions">
             <button type="button" className="neon-btn" onClick={runSetup} disabled={isBusy}>
@@ -417,6 +553,11 @@ export default function App() {
           Cette action charge votre bilan 2025 :
           temps de travail par projet, puis congés et absences sur {LEAVES_SCOPE_LABEL}.
         </p>
+        {targetEmail ? (
+          <p className="hint">Utilisateur ciblé: {targetEmail}</p>
+        ) : (
+          <p className="hint">Utilisateur ciblé: votre propre compte</p>
+        )}
         <div className="actions">
           <button
             type="button"
@@ -555,6 +696,16 @@ export default function App() {
                   <p>{formatPercent(summary.utilizationRate)}</p>
                   <small>Formule: 100 % - taux WAROE.</small>
                 </article>
+              </div>
+              <div className="actions">
+                <button
+                  type="button"
+                  className="neon-btn secondary"
+                  onClick={exportExcel}
+                  disabled={isExporting || isBusy || !report || !leaves}
+                >
+                  {isExporting ? 'Export Excel en cours...' : 'Exporter un fichier Excel (.xlsx)'}
+                </button>
               </div>
             </section>
 
@@ -833,6 +984,25 @@ export default function App() {
           </>
         ) : null}
       </main>
+
+      <footer className="glass support-footer reveal">
+        <h3>☕ Soutenir ce projet</h3>
+        <p>
+          Un vendredi 13, avant que la journée ne fasse du bruit, cet outil a pris vie sur une
+          machine perso, avec des clés perso, dans un coin de temps volé au calendrier.
+        </p>
+        <p>
+          Il a été pensé pour celles et ceux qui tiennent la barre quand le vent change, pour
+          alléger les heures, remettre un peu d air, et laisser une trace utile sur la route.
+        </p>
+        <p>
+          Si ce compagnon vous rend service, vous pouvez lui offrir un café pour continuer
+          l aventure en douceur.
+        </p>
+        <a className="neon-btn secondary" href={KOFI_URL} target="_blank" rel="noreferrer">
+          Ouvrir la page Ko-fi
+        </a>
+      </footer>
     </div>
   );
 }

@@ -380,6 +380,109 @@ async function searchIssuesByJqlSafe(token, jql, fields) {
   }
 }
 
+function normalizeIdentity(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set((values || []).map((v) => String(v || '').trim()).filter(Boolean))];
+}
+
+async function searchUsersSafe(token, endpoint) {
+  try {
+    const users = await jiraFetchJson(token, endpoint);
+    return Array.isArray(users) ? users : [];
+  } catch {
+    return [];
+  }
+}
+
+function pickBestUserMatch(users, requestedEmail) {
+  if (!users.length) return null;
+  const target = normalizeIdentity(requestedEmail);
+  const exact = users.find((user) => normalizeIdentity(user?.emailAddress) === target);
+  if (exact) return exact;
+  const byIdentity = users.find((user) => {
+    const identities = uniqueNonEmpty([user?.accountId, user?.name, user?.key, user?.emailAddress, user?.displayName]);
+    return identities.some((value) => normalizeIdentity(value) === target);
+  });
+  return byIdentity || users[0];
+}
+
+function buildAuthorScopes(targetUser, me) {
+  const scopes = [];
+  if (sameUser(targetUser, me)) {
+    scopes.push('worklogAuthor = currentUser()');
+  }
+
+  const identifiers = uniqueNonEmpty([
+    targetUser?.accountId,
+    targetUser?.name,
+    targetUser?.key,
+    targetUser?.emailAddress,
+  ]);
+  for (const identifier of identifiers) {
+    scopes.push(`worklogAuthor = "${escapeJqlString(identifier)}"`);
+  }
+
+  return uniqueNonEmpty(scopes);
+}
+
+async function resolveTargetUser(token, requestedEmail) {
+  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+  const email = String(requestedEmail || '').trim();
+
+  if (!email) {
+    return {
+      me,
+      targetUser: me,
+      authorScopes: ['worklogAuthor = currentUser()'],
+      notes: [],
+      mode: 'current',
+      requestedEmail: '',
+    };
+  }
+
+  const meMatchesEmail = uniqueNonEmpty([
+    me?.emailAddress,
+    me?.accountId,
+    me?.name,
+    me?.key,
+    me?.displayName,
+  ]).some((value) => normalizeIdentity(value) === normalizeIdentity(email));
+
+  let targetUser = meMatchesEmail ? me : null;
+  const notes = [];
+
+  if (!targetUser) {
+    const queryResults = await searchUsersSafe(token, `/rest/api/2/user/search?query=${encodeURIComponent(email)}`);
+    const usernameResults = await searchUsersSafe(token, `/rest/api/2/user/search?username=${encodeURIComponent(email)}`);
+    const mergedUsers = [...queryResults, ...usernameResults];
+    targetUser = pickBestUserMatch(mergedUsers, email);
+  }
+
+  if (!targetUser) {
+    throw new Error(
+      "Impossible de trouver cet utilisateur Jira. Vérifiez l'adresse e-mail, ou laissez le champ vide pour votre propre compte."
+    );
+  }
+
+  const authorScopes = buildAuthorScopes(targetUser, me);
+  if (!authorScopes.length) {
+    notes.push('Aucun filtre auteur exploitable, retour sur currentUser().');
+    authorScopes.push('worklogAuthor = currentUser()');
+  }
+
+  return {
+    me,
+    targetUser,
+    authorScopes,
+    notes,
+    mode: sameUser(targetUser, me) ? 'current' : 'delegated',
+    requestedEmail: email,
+  };
+}
+
 function normalizeProjectKeys(inputKeys) {
   if (!Array.isArray(inputKeys) || !inputKeys.length) {
     return [...DEFAULT_DETAILED_PROJECT_KEYS];
@@ -387,12 +490,24 @@ function normalizeProjectKeys(inputKeys) {
   return [...new Set(inputKeys.map((v) => String(v || '').trim().toUpperCase()).filter(Boolean))];
 }
 
-async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAILED_PROJECT_KEYS) {
-  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAILED_PROJECT_KEYS, requestedEmail = '') {
+  const userContext = await resolveTargetUser(token, requestedEmail);
   const detailedSet = new Set(normalizeProjectKeys(detailedProjectKeys));
+  const issueByKey = new Map();
+  const discoveryLogs = [...userContext.notes];
 
-  const jql = 'worklogAuthor = currentUser() AND worklogDate >= "2025-01-01" AND worklogDate <= "2025-12-31"';
-  const allIssues = await searchAllIssuesByJql(token, jql, 'project,key,summary,issuetype,parent');
+  for (const authorScope of userContext.authorScopes) {
+    const jql = `${authorScope} AND worklogDate >= "2025-01-01" AND worklogDate <= "2025-12-31"`;
+    const result = await searchIssuesByJqlSafe(token, jql, 'project,key,summary,issuetype,parent');
+    if (!result.ok) {
+      discoveryLogs.push(`Filtre auteur non disponible: ${authorScope}`);
+      continue;
+    }
+    for (const issue of result.issues) {
+      issueByKey.set(issue.key, issue);
+    }
+  }
+  const allIssues = [...issueByKey.values()];
 
   const byProject = new Map();
   const detailedByProject = new Map();
@@ -421,7 +536,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
 
       for (const wl of worklogs) {
         if (!inDateRange(wl.started)) continue;
-        if (!sameUser(wl.author, me)) continue;
+        if (!sameUser(wl.author, userContext.targetUser)) continue;
 
         keptWorklogs += 1;
         const seconds = Number(wl.timeSpentSeconds || 0);
@@ -530,6 +645,21 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   detailedProjects.sort((a, b) => a.projectKey.localeCompare(b.projectKey));
 
   return {
+    user: {
+      mode: userContext.mode,
+      requestedEmail: userContext.requestedEmail || null,
+      resolvedEmail: userContext.targetUser?.emailAddress || null,
+      displayName:
+        userContext.targetUser?.displayName ||
+        userContext.targetUser?.name ||
+        userContext.targetUser?.emailAddress ||
+        'Utilisateur',
+    },
+    discovery: {
+      sourceIssueCount: allIssues.length,
+      authorScopeCount: userContext.authorScopes.length,
+      notes: discoveryLogs,
+    },
     projects,
     detailedProjects,
     totalHours: Number((totalSeconds / 3600).toFixed(2)),
@@ -538,28 +668,31 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   };
 }
 
-async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY) {
-  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE_KEY, requestedEmail = '') {
+  const userContext = await resolveTargetUser(token, requestedEmail);
   const normalizedRootKey = String(rootIssueKey || ANNUAL_LEAVES_ISSUE_KEY).trim().toUpperCase();
   const escapedRootKey = escapeJqlString(normalizedRootKey);
   const leavesProjectKey = normalizedRootKey.includes('-') ? normalizedRootKey.split('-')[0] : normalizedRootKey;
   const fields = 'key,summary,status,issuetype,parent';
   const issueByKey = new Map();
-  const discoveryLogs = [];
+  const discoveryLogs = [...userContext.notes];
   let usedFallbackScope = false;
-  const projectScopeJql =
-    'worklogAuthor = currentUser() ' +
-    'AND worklogDate >= "2025-01-01" ' +
-    'AND worklogDate <= "2025-12-31" ' +
-    `AND project = ${leavesProjectKey}`;
 
-  const projectScopeResult = await searchIssuesByJqlSafe(token, projectScopeJql, fields);
-  if (projectScopeResult.ok) {
+  for (const authorScope of userContext.authorScopes) {
+    const projectScopeJql =
+      `${authorScope} ` +
+      'AND worklogDate >= "2025-01-01" ' +
+      'AND worklogDate <= "2025-12-31" ' +
+      `AND project = ${leavesProjectKey}`;
+
+    const projectScopeResult = await searchIssuesByJqlSafe(token, projectScopeJql, fields);
+    if (!projectScopeResult.ok) {
+      discoveryLogs.push(`Projet ${leavesProjectKey} non accessible avec ${authorScope}.`);
+      continue;
+    }
     for (const issue of projectScopeResult.issues) {
       issueByKey.set(issue.key, issue);
     }
-  } else {
-    discoveryLogs.push(`Projet ${leavesProjectKey} non accessible via ce filtre.`);
   }
 
   if (!issueByKey.size) {
@@ -571,19 +704,21 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
       `issue in linkedIssues("${escapedRootKey}")`,
     ];
 
-    for (const scope of scopeQueries) {
-      const jql =
-        'worklogAuthor = currentUser() ' +
-        'AND worklogDate >= "2025-01-01" ' +
-        'AND worklogDate <= "2025-12-31" ' +
-        `AND (${scope})`;
-      const result = await searchIssuesByJqlSafe(token, jql, fields);
-      if (!result.ok) {
-        discoveryLogs.push(`Filtre non disponible: ${scope}`);
-        continue;
-      }
-      for (const issue of result.issues) {
-        issueByKey.set(issue.key, issue);
+    for (const authorScope of userContext.authorScopes) {
+      for (const scope of scopeQueries) {
+        const jql =
+          `${authorScope} ` +
+          'AND worklogDate >= "2025-01-01" ' +
+          'AND worklogDate <= "2025-12-31" ' +
+          `AND (${scope})`;
+        const result = await searchIssuesByJqlSafe(token, jql, fields);
+        if (!result.ok) {
+          discoveryLogs.push(`Filtre non disponible: ${scope} / ${authorScope}`);
+          continue;
+        }
+        for (const issue of result.issues) {
+          issueByKey.set(issue.key, issue);
+        }
       }
     }
 
@@ -617,7 +752,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
 
       for (const wl of worklogs) {
         if (!inDateRange(wl.started)) continue;
-        if (!sameUser(wl.author, me)) continue;
+        if (!sameUser(wl.author, userContext.targetUser)) continue;
         const seconds = Number(wl.timeSpentSeconds || 0);
         if (!seconds) continue;
         keptWorklogs += 1;
@@ -661,6 +796,16 @@ async function collectAnnualLeaves2025(token, rootIssueKey = ANNUAL_LEAVES_ISSUE
   const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
 
   return {
+    user: {
+      mode: userContext.mode,
+      requestedEmail: userContext.requestedEmail || null,
+      resolvedEmail: userContext.targetUser?.emailAddress || null,
+      displayName:
+        userContext.targetUser?.displayName ||
+        userContext.targetUser?.name ||
+        userContext.targetUser?.emailAddress ||
+        'Utilisateur',
+    },
     issueKey: normalizedRootKey,
     issueCount: issues.length,
     worklogCount: keptWorklogs,
@@ -747,7 +892,7 @@ app.post('/api/jira/report', async (req, res) => {
       return;
     }
 
-    const report = await collectWorkedHours2025(token, req.body?.detailedProjectKeys);
+    const report = await collectWorkedHours2025(token, req.body?.detailedProjectKeys, req.body?.userEmail);
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erreur lors du chargement des heures 2025' });
@@ -762,7 +907,11 @@ app.post('/api/jira/leaves', async (req, res) => {
       return;
     }
 
-    const leaves = await collectAnnualLeaves2025(token, req.body?.issueKey || ANNUAL_LEAVES_ISSUE_KEY);
+    const leaves = await collectAnnualLeaves2025(
+      token,
+      req.body?.issueKey || ANNUAL_LEAVES_ISSUE_KEY,
+      req.body?.userEmail
+    );
     res.json(leaves);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erreur lors du chargement des conges annuels' });

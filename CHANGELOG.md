@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-03-13 12:19 CET
+
+### Added
+
+- Added an optional target email field in the token/setup step to analyze another Jira user when the PAT has permissions.
+- Added Excel export (`.xlsx`) from step 4 with friendly sheets for summary, projects, bench breakdown, and leaves breakdown.
+- Added a visible "Soutenir ce projet" footer section in the UI with a direct Ko-fi link.
+
+### Changed
+
+- Extended report and leaves APIs to accept `userEmail` and filter worklogs for the selected user.
+- Reworked the "Soutenir ce projet" wording in the UI footer and README to a more subtle, literary, and implicit tone.
+
 ## [1.12.0] - 2026-03-13 12:13 CET
 
 ### Added

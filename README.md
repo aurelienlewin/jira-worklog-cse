@@ -11,6 +11,8 @@ Objectif:
 - afficher les conges 2025 et un resume clair des indicateurs utiles.
 - afficher des panneaux de detail pour le bench (`WAROE`) et les conges, avec sous-taches et repartition par type d'issue (tous types).
 - afficher les conges/absences sur tout le scope `ZLH-*` (ex: `ZLH-1`, `ZLH-2`, `ZLH-4`) quand du temps est saisi sur votre utilisateur.
+- permettre de cibler un autre utilisateur via son e-mail (si votre PAT a les droits).
+- exporter un fichier Excel clair avec les resumes, calculs et tableaux utiles.
 
 ## Interface
 
@@ -25,6 +27,8 @@ L'application affiche des etats de chargement explicites et des toasts cumulativ
 Un indicateur de progression en temps reel est affiche pendant la collecte des donnees Jira.
 Le theme visuel est volontairement clair et apaisant (printemps, lever de soleil, ambiance campagne).
 La cle d'acces est memorisee dans la session navigateur pour reprendre automatiquement sur l'etape 4.
+L'e-mail cible (optionnel) est aussi memorise dans la session pour reprendre la meme analyse.
+Un footer "Soutenir ce projet" est visible dans l'application avec acces direct a Ko-fi.
 
 Le rapport inclut:
 
@@ -76,20 +80,20 @@ Pendant l'etape de configuration, l'app tente:
 
 ## Soutenir ce projet
 
-Ce projet est ne un vendredi 13.
-Pour moi, c'etait un signe de chance, le bon moment pour faire quelque chose d'utile.
+Ce projet est ne un vendredi 13, a l heure ou la ville baille encore.
+Un signe de chance, peut-etre, ou juste le bon moment pour faire quelque chose d'utile.
 
-Je l'ai construit pour mes collegues, pour leur faire gagner du temps et enlever un peu de charge mentale.
-Le contexte est difficile, avec des incertitudes et des suppressions de postes, et je voulais laisser
-un outil simple, concret, et positif pour celles et ceux qui continuent le chemin.
+Il a ete construit sur du temps perso, sur un ordinateur perso, avec des tokens Codex persos.
+Un geste simple: enlever un peu de poids des epaules, remettre de la clarte dans les chiffres,
+et garder un cap quand la mer n'est pas tres calme.
 
-J'ai code cette application sur mon temps personnel, avec mon ordinateur personnel,
-et avec mes tokens Codex personnels.
-Pas pour "faire joli", mais pour rendre service jusqu'au bout, meme en quittant l'entreprise dans quelques jours.
+Il y a des periodes ou les couloirs changent de musique.
+On ne dit pas toujours les choses, mais on les sent.
+Alors ce projet avance comme une lampe de poche dans la brume: pas pour faire du bruit,
+juste pour eclairer quelques pas de plus.
 
-Ces derniers mois ont ete un vrai grand huit.
-Mais j'y ai rencontre des personnes remarquables, genereuses, brillantes, et courageuses.
-Ce projet est ma facon de dire merci, et de transmettre de bonnes ondes pour la suite.
+J'y ai croise des personnes solides, fines, lumineuses.
+Cette page est une facon de leur dire merci, sans grand discours.
 
 Si tu veux soutenir ce travail:
 
