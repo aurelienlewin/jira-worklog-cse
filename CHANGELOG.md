@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-13 11:33 CET
+
+### Added
+
+- Added backend support for project-specific breakdowns on top of yearly totals.
+- Added dedicated OSFO/ROEMO subtask hours details in the UI report.
+
+### Changed
+
+- Extended Jira report API to accept `detailedProjectKeys` and return `detailedProjects`.
+
 ## [1.3.0] - 2026-03-13 11:35 CET
 
 ### Changed

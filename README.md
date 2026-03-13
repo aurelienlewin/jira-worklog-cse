@@ -7,7 +7,8 @@ Objectif:
 - vous guider pas a pas pour creer un PAT Jira,
 - configurer Codex + MCP automatiquement,
 - verifier la connexion,
-- afficher les heures travaillees en 2025 par projet Jira, avec total final.
+- afficher les heures travaillees en 2025 par projet Jira, avec total final,
+- afficher le detail des sous-taches pour OSFO et ROEMO.
 
 ## Interface
 
@@ -19,6 +20,11 @@ Le parcours est organise en 4 etapes claires:
 4. Charger le rapport des heures 2025
 
 L'application affiche des etats de chargement explicites et du feedback en direct.
+
+Le rapport inclut:
+
+- les heures totales par projet,
+- un detail dedie des sous-taches pour `OSFO` et `ROEMO`.
 
 ## Prerequis
 
