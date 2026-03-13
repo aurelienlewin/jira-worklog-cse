@@ -31,3 +31,18 @@ npm run dev
 - `npm run dev`: API + web en parallele.
 - `npm run build`: build frontend.
 - `npm start`: demarre uniquement l'API.
+
+## Open Source
+
+Ce projet est open source sous licence MIT.
+
+- Licence: [LICENSE](./LICENSE)
+- Code de conduite: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- Contribuer: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Securite: [SECURITY.md](./SECURITY.md)
+
+## Support / Funding
+
+Si ce projet t'aide, tu peux me soutenir ici:
+
+- Ko-fi: https://ko-fi.com/aurelienlewin
