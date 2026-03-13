@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-03-13 12:41 CET
+
+### Fixed
+
+- Fixed Excel export runtime crash by supporting both `exceljs` module shapes in browser builds (`default` and direct export), with explicit guard/error message when Workbook is unavailable.
+
 ## [1.16.0] - 2026-03-13 12:39 CET
 
 ### Changed

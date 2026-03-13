@@ -450,7 +450,11 @@ export default function App() {
     setIsExporting(true);
     try {
       addToast('📦 Préparation du fichier Excel...', 'info');
-      const ExcelJS = await import('exceljs');
+      const excelModule = await import('exceljs');
+      const ExcelJS = excelModule.default || excelModule;
+      if (!ExcelJS?.Workbook) {
+        throw new Error("Le module d'export Excel n'a pas pu être chargé correctement.");
+      }
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Jira Worklog CSE';
       workbook.created = new Date();
