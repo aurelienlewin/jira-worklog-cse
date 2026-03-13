@@ -468,9 +468,10 @@ async function resolveTargetUser(token, requestedEmail) {
   }
 
   if (!targetUser) {
-    throw new Error(
-      "Impossible de trouver cet utilisateur Jira. Vérifiez l'adresse e-mail, ou laissez le champ vide pour votre propre compte."
+    notes.push(
+      "Adresse e-mail introuvable ou non accessible avec ce PAT. Retour automatique sur votre propre compte."
     );
+    targetUser = me;
   }
 
   const authorScopes = buildAuthorScopes(targetUser, me);
@@ -479,12 +480,19 @@ async function resolveTargetUser(token, requestedEmail) {
     authorScopes.push('worklogAuthor = currentUser()');
   }
 
+  const resolvedToCurrent = sameUser(targetUser, me);
+  const mode = notes.length && resolvedToCurrent && email
+    ? 'fallback_current'
+    : resolvedToCurrent
+      ? 'current'
+      : 'delegated';
+
   return {
     me,
     targetUser,
     authorScopes,
     notes,
-    mode: sameUser(targetUser, me) ? 'current' : 'delegated',
+    mode,
     requestedEmail: email,
   };
 }

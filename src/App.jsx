@@ -191,11 +191,17 @@ export default function App() {
   }
 
   async function postJson(url, payload) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw new Error("Impossible de joindre le serveur local. Vérifiez que l'application tourne avec `npm run dev`.");
+    }
+
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Une erreur est survenue.');
     return data;
@@ -234,6 +240,12 @@ export default function App() {
       const userLabel = leavesData?.user?.resolvedEmail || hoursData?.user?.resolvedEmail || activeUserEmail || '';
       if (userLabel) {
         addToast(`👤 Analyse réalisée pour : ${userLabel}`, 'info');
+      }
+      if (activeUserEmail && (hoursData?.user?.mode === 'fallback_current' || leavesData?.user?.mode === 'fallback_current')) {
+        addToast(
+          "ℹ️ L'e-mail saisi n'a pas pu être résolu avec ce PAT. Les données affichées correspondent à votre compte.",
+          'warn'
+        );
       }
       addToast(
         `✅ Rapport chargé : ${formatNumber(hoursData.totalHours)} h de travail en 2025.`,
