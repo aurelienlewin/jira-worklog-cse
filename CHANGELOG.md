@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.6] - 2026-03-13 13:11 CET
+
+### Changed
+
+- Aligned the in-app “Soutenir ce projet” footer wording with the README support section text.
+
 ## [1.16.5] - 2026-03-13 13:09 CET
 
 ### Changed

@@ -1347,16 +1347,26 @@ export default function App() {
       <footer className="glass support-footer reveal">
         <h3>☕ Soutenir ce projet</h3>
         <p>
-          Un vendredi 13, avant que la journée ne fasse du bruit, cet outil a pris vie sur une
-          machine perso, avec des clés perso, dans un coin de temps volé au calendrier.
+          Ce projet est né un vendredi 13, à l'heure où la ville bâille encore.
+          Un signe de chance, peut-être, ou juste le bon moment pour faire quelque chose d'utile.
         </p>
         <p>
-          Il a été pensé pour celles et ceux qui tiennent la barre quand le vent change, pour
-          alléger les heures, remettre un peu d'air, et laisser une trace utile sur la route.
+          Il a été construit sur du temps perso, sur un ordinateur perso, avec des tokens Codex persos.
+          Un geste simple : enlever un peu de poids des épaules, remettre de la clarté dans les chiffres,
+          et garder un cap quand la mer n'est pas très calme.
         </p>
         <p>
-          Si ce compagnon vous rend service, vous pouvez lui offrir un café pour continuer
-          l'aventure en douceur.
+          Il y a des périodes où les couloirs changent de musique.
+          On ne dit pas toujours les choses, mais on les sent.
+          Alors ce projet avance comme une lampe de poche dans la brume : pas pour faire du bruit,
+          juste pour éclairer quelques pas de plus.
+        </p>
+        <p>
+          J'y ai croisé des personnes solides, fines, lumineuses.
+          Cette page est une façon de leur dire merci, sans grand discours.
+        </p>
+        <p>
+          Si tu veux soutenir ce travail :
         </p>
         <a className="neon-btn secondary" href={KOFI_URL} target="_blank" rel="noreferrer">
           Ouvrir la page Ko-fi
