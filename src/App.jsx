@@ -200,6 +200,25 @@ function getIssueBrowseUrl(issueKey) {
   return `${ISSUE_BROWSE_BASE_URL}/browse/${encodeURIComponent(String(issueKey))}`;
 }
 
+function sanitizeFilePart(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 48);
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function prefersReducedMotion() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -306,6 +325,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [busyAction, setBusyAction] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [reportProgress, setReportProgress] = useState({ active: false, value: 0, label: '' });
   const [benchSubtasksVisibleCount, setBenchSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [benchIssuesVisibleCount, setBenchIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
@@ -473,6 +493,30 @@ export default function App() {
     }
 
     return { resolvedEmail, mode, message, fallback, delegated, displayName, avatarUrl };
+  }, [report, leaves, targetEmail]);
+
+  const exportIdentity = useMemo(() => {
+    const fromReport = report?.user || null;
+    const fromLeaves = leaves?.user || null;
+    const displayName = String(fromLeaves?.displayName || fromReport?.displayName || '').trim();
+    const resolvedEmail = String(
+      fromLeaves?.resolvedEmail ||
+      fromReport?.resolvedEmail ||
+      targetEmail ||
+      ''
+    ).trim();
+    const fallbackLabel = displayName || resolvedEmail || 'mon-compte';
+    const filePart =
+      sanitizeFilePart(displayName) ||
+      sanitizeFilePart(resolvedEmail.split('@')[0] || resolvedEmail) ||
+      'mon-compte';
+
+    return {
+      displayName: displayName || null,
+      resolvedEmail: resolvedEmail || null,
+      label: fallbackLabel,
+      filePart,
+    };
   }, [report, leaves, targetEmail]);
 
   const benchNarrative = useMemo(() => {
@@ -1054,28 +1098,134 @@ export default function App() {
         sheet.views = [{ state: 'frozen', ySplit: 1 }];
       }
 
-      const analysedUser =
-        leaves?.user?.resolvedEmail ||
-        report?.user?.resolvedEmail ||
-        String(targetEmail || '').trim() ||
-        'Mon compte';
+      function paintCard(sheet, startCol, startRow, title, value, subtitle, colorArgb) {
+        const endCol = startCol + 2;
+        const endRow = startRow + 3;
+        sheet.mergeCells(startRow, startCol, startRow, endCol);
+        sheet.mergeCells(startRow + 1, startCol, startRow + 2, endCol);
+        sheet.mergeCells(startRow + 3, startCol, endRow, endCol);
+
+        const titleCell = sheet.getCell(startRow, startCol);
+        titleCell.value = title;
+        titleCell.font = { bold: true, color: { argb: 'FF31462B' }, size: 11 };
+        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        const valueCell = sheet.getCell(startRow + 1, startCol);
+        valueCell.value = value;
+        valueCell.font = { bold: true, color: { argb: 'FF2B3F24' }, size: 16 };
+        valueCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        const subtitleCell = sheet.getCell(startRow + 3, startCol);
+        subtitleCell.value = subtitle;
+        subtitleCell.font = { color: { argb: 'FF4F6949' }, size: 10 };
+        subtitleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+        for (let row = startRow; row <= endRow; row += 1) {
+          for (let col = startCol; col <= endCol; col += 1) {
+            const cell = sheet.getCell(row, col);
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: colorArgb },
+            };
+            cell.border = {
+              top: { style: 'thin', color: { argb: '66A2B88B' } },
+              left: { style: 'thin', color: { argb: '66A2B88B' } },
+              bottom: { style: 'thin', color: { argb: '66A2B88B' } },
+              right: { style: 'thin', color: { argb: '66A2B88B' } },
+            };
+          }
+        }
+      }
+
+      const analysedUser = exportIdentity.label || 'Mon compte';
       const generatedAt = new Date().toLocaleString('fr-FR');
 
-      const summaryRows = [
-        { Indicateur: "Date d'export", Valeur: generatedAt },
-        { Indicateur: 'Utilisateur analysé', Valeur: analysedUser },
-        { Indicateur: 'Total heures travaillées 2025', Valeur: summary.workedHours },
-        { Indicateur: 'Total heures congés/absences 2025', Valeur: summary.leavesHours },
-        { Indicateur: 'Total jours congés/absences 2025', Valeur: summary.leavesDays },
-        { Indicateur: 'Heures BENCH', Valeur: summary.benchHours },
-        { Indicateur: 'Taux bench (%)', Valeur: Number(summary.benchRate.toFixed(2)) },
-        { Indicateur: "Taux d'utilisation (%)", Valeur: Number(summary.utilizationRate.toFixed(2)) },
-        {
-          Indicateur: 'Résumé commentaires bench',
-          Valeur: benchCommentSummary?.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local',
-        },
+      const summarySheet = workbook.addWorksheet('Synthese_UI');
+      summarySheet.columns = [
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
       ];
-      addWorksheet('Synthèse', summaryRows);
+      summarySheet.mergeCells('A1:F1');
+      summarySheet.getCell('A1').value = 'Worklog CSE - Synthese 2025';
+      summarySheet.getCell('A1').font = { bold: true, size: 18, color: { argb: 'FF42583A' } };
+      summarySheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+      summarySheet.getCell('A1').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF5FAEC' },
+      };
+
+      summarySheet.mergeCells('A2:C2');
+      summarySheet.getCell('A2').value = `Utilisateur: ${analysedUser}`;
+      summarySheet.getCell('A2').font = { bold: true, color: { argb: 'FF35532F' } };
+      summarySheet.getCell('A2').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F8E6' },
+      };
+      summarySheet.mergeCells('D2:F2');
+      summarySheet.getCell('D2').value = `Export: ${generatedAt}`;
+      summarySheet.getCell('D2').font = { bold: true, color: { argb: 'FF35532F' } };
+      summarySheet.getCell('D2').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F8E6' },
+      };
+
+      paintCard(
+        summarySheet,
+        1,
+        4,
+        'Heures travaillees',
+        `${formatNumber(summary.workedHours)} h`,
+        'Total des heures de travail en 2025',
+        'FFF7FDF0'
+      );
+      paintCard(
+        summarySheet,
+        4,
+        4,
+        'Conges / absences',
+        `${formatNumber(summary.leavesHours)} h`,
+        `${formatNumber(summary.leavesDays)} jours`,
+        'FFFFF8EE'
+      );
+      paintCard(
+        summarySheet,
+        1,
+        9,
+        'Taux bench',
+        `${formatPercent(summary.benchRate)}`,
+        `${formatNumber(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`,
+        'FFF9F2EC'
+      );
+      paintCard(
+        summarySheet,
+        4,
+        9,
+        "Taux d'utilisation",
+        `${formatPercent(summary.utilizationRate)}`,
+        'Formule: 100% - taux bench',
+        'FFEFF7F0'
+      );
+
+      summarySheet.mergeCells('A14:F14');
+      summarySheet.getCell('A14').value = `Narratif bench: ${benchNarrative}`;
+      summarySheet.getCell('A14').alignment = { wrapText: true, vertical: 'top' };
+      summarySheet.getCell('A14').font = { color: { argb: 'FF4B6343' }, size: 10 };
+      summarySheet.getCell('A14').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF8FBF4' },
+      };
+      summarySheet.getRow(1).height = 28;
+      summarySheet.getRow(14).height = 36;
+      summarySheet.views = [{ state: 'frozen', ySplit: 2 }];
 
       const projectRows = (report.projects || []).map((project) => ({
         Projet: project.projectKey,
@@ -1144,7 +1294,7 @@ export default function App() {
       const downloadUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `worklog-cse-${safeDate}.xlsx`;
+      link.download = `worklog-cse-${exportIdentity.filePart}-${safeDate}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1155,6 +1305,349 @@ export default function App() {
       addToast(err.message || "❌ Impossible d'exporter le fichier Excel.", 'error');
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function exportPdf() {
+    if (!report || !leaves) {
+      addToast("⚠️ Chargez d'abord les données 2025 avant d'exporter.", 'warn');
+      return;
+    }
+
+    setIsExportingPdf(true);
+    try {
+      addToast('🧾 Préparation du PDF...', 'info');
+      if (typeof window === 'undefined') {
+        throw new Error('Export PDF indisponible dans ce contexte.');
+      }
+
+      const generatedAt = new Date().toLocaleString('fr-FR');
+      const safeDate = new Date().toISOString().slice(0, 10);
+      const docTitle = `worklog-cse-${exportIdentity.filePart}-${safeDate}.pdf`;
+      const analysedUser = exportIdentity.label || 'Mon compte';
+
+      const toRows = (items, headers, rowBuilder) => {
+        if (!Array.isArray(items) || !items.length) {
+          return `<p class="empty">Aucune donnée.</p>`;
+        }
+        const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+        const body = items.map((entry) => {
+          const cols = rowBuilder(entry).map((cell) => `<td>${escapeHtml(cell)}</td>`).join('');
+          return `<tr>${cols}</tr>`;
+        }).join('');
+        return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      };
+
+      const html = `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(docTitle)}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f7f5e9;
+      --panel: #ffffff;
+      --line: #d4dfc6;
+      --text: #33452f;
+      --muted: #5f7959;
+      --title: #4b603f;
+      --chip: #eef6e4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Nunito", "Avenir Next", "Trebuchet MS", sans-serif;
+      background: linear-gradient(180deg, #f7f5e9 0%, #fde8c8 45%, #dce9c4 100%);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .page {
+      width: 100%;
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .panel {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      color: var(--title);
+      font-size: 32px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      color: var(--title);
+      font-size: 20px;
+    }
+    h3 {
+      margin: 12px 0 8px;
+      color: #4f6341;
+      font-size: 15px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .meta span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--chip);
+      border: 1px solid #cad8b6;
+      font-size: 12px;
+      color: #476042;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .card {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fbfdf7;
+    }
+    .card strong {
+      display: block;
+      font-size: 12px;
+      color: #5d7756;
+    }
+    .card p {
+      margin: 6px 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #42593a;
+    }
+    .card small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .narrative {
+      margin-top: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid #d6e1c9;
+      background: #f8fbf4;
+      color: #4f6949;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 11px;
+      background: #fff;
+    }
+    th, td {
+      border: 1px solid #d8e2cc;
+      padding: 6px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef6e4;
+      color: #445a3d;
+      font-weight: 700;
+    }
+    .empty {
+      margin: 0;
+      color: #6d8169;
+      font-size: 12px;
+      font-style: italic;
+    }
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    @media print {
+      body { background: #fff; }
+      .page { max-width: none; padding: 8mm; }
+      .panel { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="panel">
+      <h1>Worklog CSE - Export PDF 2025</h1>
+      <div class="meta">
+        <span>Utilisateur: ${escapeHtml(analysedUser)}</span>
+        <span>Date export: ${escapeHtml(generatedAt)}</span>
+        <span>Scope bench: ${escapeHtml(BENCH_SCOPE_KEY)}</span>
+        <span>Scope congés: ${escapeHtml(LEAVE_SCOPE_LABEL)}</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Résumé</h2>
+      <div class="cards">
+        <article class="card">
+          <strong>Heures travaillées</strong>
+          <p>${escapeHtml(`${formatNumber(summary.workedHours)} h`)}</p>
+          <small>Total des heures de travail en 2025.</small>
+        </article>
+        <article class="card">
+          <strong>Congés / absences</strong>
+          <p>${escapeHtml(`${formatNumber(summary.leavesHours)} h`)}</p>
+          <small>${escapeHtml(`${formatNumber(summary.leavesDays)} jours`)}</small>
+        </article>
+        <article class="card">
+          <strong>Taux bench</strong>
+          <p>${escapeHtml(formatPercent(summary.benchRate))}</p>
+          <small>${escapeHtml(`${formatNumber(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
+        </article>
+        <article class="card">
+          <strong>Taux d'utilisation</strong>
+          <p>${escapeHtml(formatPercent(summary.utilizationRate))}</p>
+          <small>Formule: 100 % - taux bench.</small>
+        </article>
+      </div>
+      <p class="narrative">${escapeHtml(benchNarrative)}</p>
+    </section>
+
+    <section class="panel">
+      <h2>Heures par projet</h2>
+      ${toRows(
+        [...(report.projects || []), { projectKey: 'TOTAL', projectName: 'Activités 2025', hours: Number(report.totalHours || 0) }],
+        ['Projet', 'Nom', 'Heures'],
+        (project) => [project.projectKey, project.projectName, formatNumber(project.hours)]
+      )}
+    </section>
+
+    <section class="panel">
+      <h2>Détail bench (${escapeHtml(BENCH_SCOPE_KEY)})</h2>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            benchDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumber(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches bench</h3>
+          ${toRows(
+            benchDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              formatNumber(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets bench</h3>
+          ${toRows(
+            benchDetails?.issues || [],
+            ['Ticket', 'Type', 'Parent', 'Résumé', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              issue.summary,
+              formatNumber(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires bench - thèmes</h3>
+          ${toRows(
+            benchCommentSummary?.themes || [],
+            ['Thème', 'Heures', 'Saisies'],
+            (theme) => [theme.label, formatNumber(theme.hours), String(theme.occurrences)]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires bench - exemples</h3>
+          ${toRows(
+            benchCommentSummary?.highlights || [],
+            ['Ticket', 'Heures', 'Commentaire'],
+            (entry) => [entry.issueKey, formatNumber(entry.hours), entry.comment]
+          )}
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Congés et absences (${escapeHtml(LEAVE_SCOPE_LABEL)})</h2>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            leavesDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumber(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches congés</h3>
+          ${toRows(
+            leavesDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures', 'Jours'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey || '-',
+              formatNumber(issue.hours),
+              formatNumber(issue.days),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets congés</h3>
+          ${toRows(
+            leaves?.issues || [],
+            ['Ticket', 'Type', 'Statut', 'Parent', 'Résumé', 'Heures', 'Jours'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.status,
+              issue.parentKey || '-',
+              issue.summary,
+              formatNumber(issue.hours),
+              formatNumber(issue.days),
+            ]
+          )}
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+    window.addEventListener('load', () => {
+      setTimeout(() => window.print(), 180);
+    });
+  </script>
+</body>
+</html>`;
+
+      const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+      if (!printWindow) {
+        throw new Error("Impossible d'ouvrir la fenêtre PDF. Autorisez les popups pour ce site.");
+      }
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+
+      addToast(
+        '✅ Vue PDF prête. Utilisez "Enregistrer en PDF" dans la fenêtre d’impression.',
+        'success'
+      );
+    } catch (err) {
+      addToast(err.message || "❌ Impossible d'exporter le PDF.", 'error');
+    } finally {
+      setIsExportingPdf(false);
     }
   }
 
@@ -1464,9 +1957,17 @@ export default function App() {
                   type="button"
                   className="neon-btn secondary"
                   onClick={exportExcel}
-                  disabled={isExporting || isBusy || !report || !leaves}
+                  disabled={isExporting || isExportingPdf || isBusy || !report || !leaves}
                 >
                   {isExporting ? 'Export Excel en cours...' : 'Exporter un fichier Excel (.xlsx)'}
+                </button>
+                <button
+                  type="button"
+                  className="neon-btn secondary"
+                  onClick={exportPdf}
+                  disabled={isExporting || isExportingPdf || isBusy || !report || !leaves}
+                >
+                  {isExportingPdf ? 'Préparation PDF...' : 'Exporter un PDF complet'}
                 </button>
               </div>
             </section>

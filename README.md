@@ -17,7 +17,8 @@ Application locale (React + Node.js) pour visualiser simplement les heures 2025,
 - affiche l'avatar de l'utilisateur analysé (si disponible),
 - résume les commentaires bench (avec Codex + fallback local),
 - permet d'interrompre une session restaurée et d'annuler les requêtes en cours,
-- exporte un `.xlsx` prêt à partager.
+- exporte un `.xlsx` enrichi (synthèse visuelle),
+- propose un export PDF complet avec une mise en page proche de l'interface.
 
 ## Parcours utilisateur
 
@@ -82,6 +83,7 @@ Notes:
 - si `ISSUE_TRACKER_URL` reste sur une valeur placeholder (`example.com`), l'API bloque les appels avec un message de configuration explicite.
 - les données (connexion + rapports) sont restaurées depuis la session navigateur, sans collecte automatique au rechargement de page,
 - une nouvelle collecte est faite uniquement après changement de clé/utilisateur (vérification) ou via le bouton manuel de rafraîchissement.
+- les noms de fichiers d'export incluent l'identité de l'utilisateur ciblé (nom/prénom ou fallback e-mail).
 
 ## Scripts
 
