@@ -8,9 +8,16 @@ const ISSUE_BROWSE_BASE_URL = String(import.meta.env.VITE_ISSUE_BROWSE_BASE_URL 
 
 const TOKEN_SESSION_KEY = 'worklog_cse_token';
 const USER_EMAIL_SESSION_KEY = 'worklog_cse_user_email';
-const LEAVE_ANCHOR_ISSUE_KEY = 'ABS-1';
-const LEAVE_SCOPE_LABEL = 'ABS-*';
-const BENCH_SCOPE_KEY = 'BENCH';
+const LEAVE_ANCHOR_ISSUE_KEY = String(import.meta.env.VITE_LEAVE_ANCHOR_ISSUE_KEY || 'ABS-1')
+  .trim()
+  .toUpperCase();
+const LEAVE_SCOPE_LABEL = String(
+  import.meta.env.VITE_LEAVE_SCOPE_LABEL ||
+  `${(LEAVE_ANCHOR_ISSUE_KEY.split('-')[0] || 'ABS').toUpperCase()}-*`
+).trim();
+const BENCH_SCOPE_KEY = String(import.meta.env.VITE_BENCH_SCOPE_KEY || 'BENCH')
+  .trim()
+  .toUpperCase();
 const BENCH_DETAIL_PROJECT_KEYS = [BENCH_SCOPE_KEY];
 const KOFI_URL = 'https://ko-fi.com/aurelienlewin';
 
@@ -105,6 +112,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function makeAbortError() {
+  const err = new Error('Requête annulée.');
+  err.name = 'AbortError';
+  return err;
+}
+
+function isAbortError(err) {
+  return Boolean(err && (err.name === 'AbortError' || String(err.message || '').toLowerCase().includes('aborted')));
+}
+
+function sleepWithSignal(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(makeAbortError());
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      reject(makeAbortError());
+    };
+
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function getIssueBrowseUrl(issueKey) {
   if (!ISSUE_BROWSE_BASE_URL || !issueKey) return '';
   return `${ISSUE_BROWSE_BASE_URL}/browse/${encodeURIComponent(String(issueKey))}`;
@@ -190,6 +229,7 @@ export default function App() {
   const stepContentRef = useRef(null);
   const connectionResultRef = useRef(null);
   const summarySectionRef = useRef(null);
+  const activeRequestControllerRef = useRef(null);
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -386,6 +426,7 @@ export default function App() {
   function addToast(message, tone = 'info', options = {}) {
     const ttlMs = Math.max(1200, Number(options.ttlMs || TOAST_TTL_MS));
     const toast = makeToast(message, tone);
+    const isPersistent = options.persistent === true || (options.persistent !== false && tone === 'error');
     setToasts((prev) => {
       const next = [...prev, toast];
       const overflow = next.length - 8;
@@ -395,7 +436,9 @@ export default function App() {
       }
       return next.slice(-8);
     });
-    scheduleToastDismiss(toast.id, ttlMs);
+    if (!isPersistent) {
+      scheduleToastDismiss(toast.id, ttlMs);
+    }
   }
 
   function addProgressToasts(lines) {
@@ -423,6 +466,27 @@ export default function App() {
     setToasts([]);
   }
 
+  function abortActiveRequests() {
+    const controller = activeRequestControllerRef.current;
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
+    activeRequestControllerRef.current = null;
+  }
+
+  function beginRequestController() {
+    abortActiveRequests();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
+    return controller;
+  }
+
+  function releaseRequestController(controller) {
+    if (activeRequestControllerRef.current === controller) {
+      activeRequestControllerRef.current = null;
+    }
+  }
+
   function isStepLocked(index) {
     return index === 3 && !connectionOk;
   }
@@ -430,18 +494,21 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearAllToastTimers();
+      abortActiveRequests();
     };
   }, []);
 
-  async function postJson(url, payload) {
+  async function postJson(url, payload, options = {}) {
     let response;
     try {
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: options.signal,
       });
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       throw new Error("Impossible de joindre le serveur local. Vérifiez que l'application tourne avec `npm run dev`.");
     }
 
@@ -465,31 +532,37 @@ export default function App() {
   async function postJsonWithRetry(url, payload, options = {}) {
     const attempts = Math.max(1, Number(options.attempts || API_RETRY_ATTEMPTS));
     const label = String(options.label || 'Requête');
+    const signal = options.signal;
     let lastError = null;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (signal?.aborted) throw makeAbortError();
       try {
-        const data = await postJson(url, payload);
+        const data = await postJson(url, payload, { signal });
         if (attempt > 1) {
           addToast(`✅ ${label} réussie après ${attempt} tentatives.`, 'success');
         }
         return data;
       } catch (err) {
+        if (isAbortError(err)) throw err;
         const message = err instanceof Error ? err.message : 'Erreur inconnue';
         lastError = new Error(message);
         if (attempt >= attempts) break;
 
         addToast(`⚠️ ${label}: tentative ${attempt}/${attempts} en échec. Nouvelle tentative...`, 'warn');
-        await sleep(API_RETRY_DELAY_MS * attempt);
+        await sleepWithSignal(API_RETRY_DELAY_MS * attempt, signal);
       }
     }
 
     throw lastError || new Error('Une erreur est survenue.');
   }
 
-  async function loadYearlyData(tokenOverride) {
+  async function loadYearlyData(tokenOverride, options = {}) {
+    const controller = options.signal ? null : beginRequestController();
+    const signal = options.signal || controller?.signal;
     const activeToken = String(tokenOverride || token || '').trim();
-    const activeUserEmail = String(targetEmail || '').trim();
+    const requestedUserEmail = options.userEmail ?? targetEmail ?? '';
+    const activeUserEmail = String(requestedUserEmail).trim();
     if (!activeToken) {
       addToast("⚠️ Merci d'abord de renseigner votre clé d'accès.", 'error');
       return;
@@ -503,14 +576,14 @@ export default function App() {
         token: activeToken,
         detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
         userEmail: activeUserEmail || undefined,
-      }, { label: 'Chargement des heures 2025', attempts: 3 });
+      }, { label: 'Chargement des heures 2025', attempts: 3, signal });
 
       setReportProgress({ active: true, value: 64, label: `Collecte des congés et absences ${LEAVE_SCOPE_LABEL}...` });
       const leavesData = await postJsonWithRetry('/api/worklogs/leaves', {
         token: activeToken,
         issueKey: LEAVE_ANCHOR_ISSUE_KEY,
         userEmail: activeUserEmail || undefined,
-      }, { label: 'Chargement des congés et absences 2025', attempts: 3 });
+      }, { label: 'Chargement des congés et absences 2025', attempts: 3, signal });
 
       setReportProgress({ active: true, value: 91, label: 'Calcul des indicateurs en cours...' });
 
@@ -547,10 +620,12 @@ export default function App() {
         });
       }
     } catch (err) {
+      if (isAbortError(err)) return;
       addToast(err.message || '❌ Impossible de charger les données 2025.', 'error');
     } finally {
       setReportProgress({ active: false, value: 0, label: '' });
       setBusyAction('');
+      if (controller) releaseRequestController(controller);
     }
   }
 
@@ -561,18 +636,20 @@ export default function App() {
       return;
     }
 
+    const controller = beginRequestController();
     setBusyAction('setup');
     try {
       const data = await postJsonWithRetry('/api/mcp/setup', { token: activeToken }, {
         label: 'Configuration MCP',
         attempts: 2,
+        signal: controller.signal,
       });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
       if (data.handshake?.ok) {
         addToast('✅ Configuration terminée avec succès.', 'success');
-        goToStep(3);
-        await loadYearlyData(activeToken);
+        goToStep(3, { force: true });
+        await loadYearlyData(activeToken, { signal: controller.signal });
       } else {
         addToast('⚠️ La configuration est terminée, mais la connexion reste à corriger.', 'warn');
         if (typeof window !== 'undefined') {
@@ -582,9 +659,11 @@ export default function App() {
         }
       }
     } catch (err) {
+      if (isAbortError(err)) return;
       addToast(err.message || '❌ Échec de la configuration.', 'error');
     } finally {
       setBusyAction('');
+      releaseRequestController(controller);
     }
   }
 
@@ -595,30 +674,34 @@ export default function App() {
       return;
     }
 
+    const controller = beginRequestController();
     setBusyAction('check');
     try {
       const data = await postJsonWithRetry('/api/mcp/check', { token: activeToken }, {
         label: 'Vérification de connexion',
         attempts: 3,
+        signal: controller.signal,
       });
       addProgressToasts(data.logs || []);
       setConnection(data.handshake || null);
 
       if (data.handshake?.ok) {
-        goToStep(3);
+        goToStep(3, { force: true });
         addToast('✅ Connexion validée. Ouverture de la vue des heures.', 'success');
         if (!options.skipDataLoad) {
-          await loadYearlyData(activeToken);
+          await loadYearlyData(activeToken, { userEmail: options.userEmail, signal: controller.signal });
         }
       } else {
         goToStep(2);
         addToast("⚠️ Connexion non validée. Revenez à l'étape 3.", 'warn');
       }
     } catch (err) {
+      if (isAbortError(err)) return;
       goToStep(2);
       addToast(err.message || '❌ Échec de la vérification.', 'error');
     } finally {
       setBusyAction('');
+      releaseRequestController(controller);
     }
   }
 
@@ -630,7 +713,7 @@ export default function App() {
 
     setToken(savedToken);
     addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
-    runCheck(savedToken);
+    runCheck(savedToken, { userEmail: savedUserEmail });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -660,9 +743,10 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [step]);
 
-  function goToStep(nextStepIndex) {
+  function goToStep(nextStepIndex, options = {}) {
+    const force = Boolean(options.force);
     if (step === nextStepIndex) return;
-    if (isStepLocked(nextStepIndex)) {
+    if (!force && isStepLocked(nextStepIndex)) {
       addToast("🔒 L'étape 4 sera disponible après la vérification de la connexion (étape 3).", 'info', {
         ttlMs: 4200,
       });
@@ -701,6 +785,10 @@ export default function App() {
   }
 
   function clearTokenAndRestart() {
+    const wasBusy = isBusy;
+    abortActiveRequests();
+    setBusyAction('');
+    setReportProgress({ active: false, value: 0, label: '' });
     setToken('');
     setTargetEmail('');
     setConnection(null);
@@ -708,8 +796,13 @@ export default function App() {
     setLeaves(null);
     writeStoredValue(TOKEN_SESSION_KEY, '');
     writeStoredValue(USER_EMAIL_SESSION_KEY, '');
-    goToStep(0);
-    addToast('ℹ️ Clé supprimée. Vous pouvez en saisir une nouvelle.', 'info');
+    goToStep(0, { force: true });
+    addToast(
+      wasBusy
+        ? '🛑 Session interrompue. Les requêtes en cours ont été annulées.'
+        : 'ℹ️ Session fermée. Vous pouvez saisir une nouvelle clé.',
+      'info'
+    );
   }
 
   async function exportExcel() {
