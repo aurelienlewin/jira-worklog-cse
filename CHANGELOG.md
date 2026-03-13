@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-03-13 11:48 CET
+
+### Changed
+
+- Reworked the full visual theme from neon/cyber to a peaceful spring sunrise style.
+- Updated panels, buttons, table, stepper, and loading visuals for a softer non-geek experience.
+
 ## [1.5.0] - 2026-03-13 11:40 CET
 
 ### Changed

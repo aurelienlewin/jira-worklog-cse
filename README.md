@@ -20,6 +20,7 @@ Le parcours est organise en 4 etapes claires:
 4. Charger le rapport des heures 2025
 
 L'application affiche des etats de chargement explicites et du feedback en direct.
+Le theme visuel est volontairement clair et apaisant (printemps, lever de soleil, ambiance campagne).
 
 Le rapport inclut:
 
