@@ -2,13 +2,68 @@ import express from 'express';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { constants as fsConstants } from 'fs';
+import { constants as fsConstants, existsSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
 import readline from 'readline';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const app = express();
 const API_PORT = Number(process.env.API_PORT || 8787);
+const DEFAULT_TRACKER_URL = 'https://example.com';
+
+function parseDotenvLine(rawLine) {
+  const line = String(rawLine || '').trim();
+  if (!line || line.startsWith('#')) return null;
+
+  const eq = line.indexOf('=');
+  if (eq <= 0) return null;
+
+  const key = line.slice(0, eq).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+
+  let value = line.slice(eq + 1).trim();
+  const hasQuotes = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+  if (hasQuotes) {
+    value = value.slice(1, -1);
+  } else {
+    const hashIdx = value.indexOf('#');
+    if (hashIdx >= 0) value = value.slice(0, hashIdx).trim();
+  }
+
+  return { key, value };
+}
+
+function loadEnvFile(filePath, options = {}) {
+  if (!existsSync(filePath)) return;
+  const override = Boolean(options.override);
+  const content = readFileSync(filePath, 'utf8');
+  const lines = content.split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    const parsed = parseDotenvLine(rawLine);
+    if (!parsed) continue;
+    if (override || process.env[parsed.key] === undefined) {
+      process.env[parsed.key] = parsed.value;
+    }
+  }
+}
+
+function loadLocalEnvConfig() {
+  const cwd = process.cwd();
+  loadEnvFile(path.join(cwd, '.env'));
+  loadEnvFile(path.join(cwd, '.env.local'), { override: true });
+}
+
+function isPlaceholderTrackerUrl(url) {
+  const normalized = String(url || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  return !normalized || normalized === DEFAULT_TRACKER_URL || normalized.includes('example.com');
+}
+
+loadLocalEnvConfig();
+
 const LEGACY_URL_ENV_KEY = String.fromCharCode(74, 73, 82, 65, 95, 85, 82, 76);
 const LEGACY_TOKEN_ENV_KEY = String.fromCharCode(
   74, 73, 82, 65, 95, 80, 69, 82, 83, 79, 78, 65, 76, 95, 84, 79, 75, 69, 78
@@ -19,7 +74,7 @@ const LEGACY_MCP_PACKAGE = String.fromCharCode(
   109, 99, 112, 45, 97, 116, 108, 97, 115, 115, 105, 97, 110, 64, 108, 97, 116, 101, 115, 116
 );
 
-const TRACKER_URL = String(process.env.ISSUE_TRACKER_URL || process.env.TRACKER_URL || process.env[LEGACY_URL_ENV_KEY] || 'https://example.com')
+const TRACKER_URL = String(process.env.ISSUE_TRACKER_URL || process.env.TRACKER_URL || process.env[LEGACY_URL_ENV_KEY] || DEFAULT_TRACKER_URL)
   .trim()
   .replace(/\/+$/, '');
 const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
@@ -337,6 +392,13 @@ async function runMcpHandshake(token) {
 }
 
 async function trackerFetchJson(token, endpoint) {
+  if (isPlaceholderTrackerUrl(TRACKER_URL)) {
+    throw new Error(
+      `Configuration manquante: ISSUE_TRACKER_URL/TRACKER_URL pointe vers "${TRACKER_URL}". ` +
+      "Renseignez l'URL réelle de votre instance dans .env.local puis redémarrez l'API."
+    );
+  }
+
   const url = `${TRACKER_URL}${endpoint}`;
   const res = await fetch(url, {
     headers: {
@@ -347,10 +409,58 @@ async function trackerFetchJson(token, endpoint) {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`API ${res.status} sur ${endpoint}: ${body.slice(0, 180)}`);
+    const error = new Error(`API ${res.status} sur ${endpoint}: ${body.slice(0, 180)}`);
+    error.status = res.status;
+    error.endpoint = endpoint;
+    throw error;
   }
 
   return res.json();
+}
+
+function makeApiPathCandidates(pathWithoutPrefix) {
+  const cleanPath = String(pathWithoutPrefix || '').replace(/^\/+/, '');
+  return [
+    `/rest/api/2/${cleanPath}`,
+    `/rest/api/3/${cleanPath}`,
+    `/rest/api/latest/${cleanPath}`,
+  ];
+}
+
+async function trackerFetchFirstAvailable(token, endpoints) {
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      return await trackerFetchJson(token, endpoint);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Erreur API: aucun endpoint disponible.');
+}
+
+async function fetchCurrentUser(token) {
+  return trackerFetchFirstAvailable(token, makeApiPathCandidates('myself'));
+}
+
+async function fetchSearchPage(token, jql, startAt, maxResults, fields) {
+  const params =
+    `jql=${encodeURIComponent(jql)}` +
+    `&startAt=${startAt}` +
+    `&maxResults=${maxResults}` +
+    `&fields=${encodeURIComponent(fields)}`;
+  const endpoints = makeApiPathCandidates(`search?${params}`);
+  return trackerFetchFirstAvailable(token, endpoints);
+}
+
+async function fetchIssueWorklogPage(token, issueKey, startAt, maxResults) {
+  const safeIssueKey = encodeURIComponent(issueKey);
+  const endpoints = makeApiPathCandidates(
+    `issue/${safeIssueKey}/worklog?startAt=${startAt}&maxResults=${maxResults}`
+  );
+  return trackerFetchFirstAvailable(token, endpoints);
 }
 
 function inDateRange(dateValue) {
@@ -401,10 +511,7 @@ async function searchAllIssuesByJql(token, jql, fields, maxResults = 100) {
   let startAt = 0;
 
   while (true) {
-    const page = await trackerFetchJson(
-      token,
-      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=${encodeURIComponent(fields)}`
-    );
+    const page = await fetchSearchPage(token, jql, startAt, maxResults, fields);
 
     const issues = page.issues || [];
     allIssues.push(...issues);
@@ -767,6 +874,39 @@ async function searchUsersSafe(token, endpoint) {
   }
 }
 
+function dedupeUsers(users) {
+  const seen = new Set();
+  const deduped = [];
+
+  for (const user of users || []) {
+    const key = normalizeIdentity(user?.accountId || user?.emailAddress || user?.name || user?.key || user?.displayName);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(user);
+  }
+
+  return deduped;
+}
+
+async function findUsersByEmail(token, email) {
+  const encoded = encodeURIComponent(email);
+  const allUsers = [];
+
+  const queryEndpoints = makeApiPathCandidates(`user/search?query=${encoded}`);
+  for (const endpoint of queryEndpoints) {
+    const users = await searchUsersSafe(token, endpoint);
+    allUsers.push(...users);
+  }
+
+  const usernameEndpoints = makeApiPathCandidates(`user/search?username=${encoded}`);
+  for (const endpoint of usernameEndpoints) {
+    const users = await searchUsersSafe(token, endpoint);
+    allUsers.push(...users);
+  }
+
+  return dedupeUsers(allUsers);
+}
+
 function pickBestUserMatch(users, requestedEmail) {
   if (!users.length) return null;
   const target = normalizeIdentity(requestedEmail);
@@ -799,7 +939,7 @@ function buildAuthorScopes(targetUser, me) {
 }
 
 async function resolveTargetUser(token, requestedEmail) {
-  const me = await trackerFetchJson(token, '/rest/api/2/myself');
+  const me = await fetchCurrentUser(token);
   const email = String(requestedEmail || '').trim();
 
   if (!email) {
@@ -825,9 +965,7 @@ async function resolveTargetUser(token, requestedEmail) {
   const notes = [];
 
   if (!targetUser) {
-    const queryResults = await searchUsersSafe(token, `/rest/api/2/user/search?query=${encodeURIComponent(email)}`);
-    const usernameResults = await searchUsersSafe(token, `/rest/api/2/user/search?username=${encodeURIComponent(email)}`);
-    const mergedUsers = [...queryResults, ...usernameResults];
+    const mergedUsers = await findUsersByEmail(token, email);
     targetUser = pickBestUserMatch(mergedUsers, email);
   }
 
@@ -905,10 +1043,13 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
     const wlMax = 1000;
 
     while (true) {
-      const logs = await trackerFetchJson(
-        token,
-        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
-      );
+      let logs;
+      try {
+        logs = await fetchIssueWorklogPage(token, issueKey, wlStart, wlMax);
+      } catch (err) {
+        discoveryLogs.push(`Ticket ${issueKey}: lecture des worklogs interrompue (${err?.message || 'worklog inaccessible'}).`);
+        break;
+      }
 
       const worklogs = logs.worklogs || [];
 
@@ -1150,12 +1291,17 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
     let wlStart = 0;
     const wlMax = 1000;
     let issueSeconds = 0;
+    let skipIssue = false;
 
     while (true) {
-      const logs = await trackerFetchJson(
-        token,
-        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
-      );
+      let logs;
+      try {
+        logs = await fetchIssueWorklogPage(token, issueKey, wlStart, wlMax);
+      } catch (err) {
+        discoveryLogs.push(`Ticket congé ${issueKey} ignoré (${err?.message || 'worklog inaccessible'}).`);
+        skipIssue = true;
+        break;
+      }
       const worklogs = logs.worklogs || [];
 
       for (const wl of worklogs) {
@@ -1170,6 +1316,8 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
       wlStart += worklogs.length;
       if (wlStart >= (logs.total || 0) || worklogs.length === 0) break;
     }
+
+    if (skipIssue) continue;
 
     totalSeconds += issueSeconds;
     issues.push({
@@ -1371,6 +1519,12 @@ async function setupFrontendRoutes() {
 
 async function startServer() {
   await setupFrontendRoutes();
+  if (isPlaceholderTrackerUrl(TRACKER_URL)) {
+    console.warn(
+      'Configuration warning: ISSUE_TRACKER_URL/TRACKER_URL is still set to a placeholder. ' +
+      'Set it in .env.local before using API endpoints.'
+    );
+  }
   app.listen(API_PORT, '127.0.0.1', () => {
     console.log(`API ready on http://localhost:${API_PORT}`);
   });
