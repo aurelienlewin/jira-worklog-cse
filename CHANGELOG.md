@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-03-13 12:25 CET
+
+### Changed
+
+- Removed the OSFO/ROEMO detailed breakdown section from the step 4 UI.
+- Stopped requesting project-specific detailed breakdown data from the frontend report call.
+- Disabled backend detailed project computation by default.
+
 ## [1.9.0] - 2026-03-13 12:20 CET
 
 ### Added

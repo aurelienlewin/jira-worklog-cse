@@ -8,7 +8,7 @@ Objectif:
 - configurer Codex + la connexion Jira automatiquement,
 - verifier la connexion,
 - afficher les heures travaillees en 2025 par projet Jira, avec total final,
-- afficher le detail complet des issues (tous types) pour OSFO et ROEMO.
+- afficher les conges 2025 et un resume clair des indicateurs utiles.
 
 ## Interface
 
@@ -26,8 +26,8 @@ La cle d'acces est memorisee dans la session navigateur pour reprendre automatiq
 Le rapport inclut:
 
 - les heures totales par projet,
-- un detail dedie de toutes les issues (stories, tasks, bugs, sous-taches, etc.) pour `OSFO` et `ROEMO`.
 - un suivi des conges annuels base sur l'issue `ZLH-1`.
+- des panneaux de synthese: total heures travaillees, total heures/jours de conges, taux WAROE et taux d'utilisation.
 
 ## Prerequis
 

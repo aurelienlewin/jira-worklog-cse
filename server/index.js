@@ -13,7 +13,7 @@ const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
 const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
 const ANNUAL_LEAVES_ISSUE_KEY = 'ZLH-1';
 const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
-const DEFAULT_DETAILED_PROJECT_KEYS = ['OSFO', 'ROEMO'];
+const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = 'mcp-atlassian-dev-osf';
 
