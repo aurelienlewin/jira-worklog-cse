@@ -66,8 +66,23 @@ Pendant l'etape de configuration, l'app tente:
 - Securite: [SECURITY.md](./SECURITY.md)
 - Historique des changements: [CHANGELOG.md](./CHANGELOG.md)
 
-## Funding
+## Soutenir ce projet
 
-Soutien du projet:
+Ce projet est ne un vendredi 13.
+Pour moi, c'etait un signe de chance, le bon moment pour faire quelque chose d'utile.
+
+Je l'ai construit pour mes collegues, pour leur faire gagner du temps et enlever un peu de charge mentale.
+Le contexte est difficile, avec des incertitudes et des suppressions de postes, et je voulais laisser
+un outil simple, concret, et positif pour celles et ceux qui continuent le chemin.
+
+J'ai code cette application sur mon temps personnel, avec mon ordinateur personnel,
+et avec mes tokens Codex personnels.
+Pas pour "faire joli", mais pour rendre service jusqu'au bout, meme en quittant l'entreprise dans quelques jours.
+
+Ces derniers mois ont ete un vrai grand huit.
+Mais j'y ai rencontre des personnes remarquables, genereuses, brillantes, et courageuses.
+Ce projet est ma facon de dire merci, et de transmettre de bonnes ondes pour la suite.
+
+Si tu veux soutenir ce travail:
 
 - Ko-fi: https://ko-fi.com/aurelienlewin

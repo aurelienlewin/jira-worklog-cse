@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-13 11:58 CET
+
+### Changed
+
+- Reworked the README support section into a full personal project story and support message.
+- Clarified project context: created on personal time, personal computer, and personal Codex tokens.
+
 ## [1.6.0] - 2026-03-13 11:48 CET
 
 ### Changed
