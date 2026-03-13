@@ -1,0 +1,502 @@
+import express from 'express';
+import os from 'os';
+import path from 'path';
+import fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
+import { spawn } from 'child_process';
+import readline from 'readline';
+
+const app = express();
+const API_PORT = Number(process.env.API_PORT || 8787);
+const JIRA_URL = 'https://dev.osf.digital';
+const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
+const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
+const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
+const MCP_SECTION = 'mcp-atlassian-dev-osf';
+
+app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
+function shellEscapeToml(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function makeMcpBlock(token) {
+  const safeToken = shellEscapeToml(token.trim());
+  return (
+    `[mcp_servers.${MCP_SECTION}]\n` +
+    `command = "uvx"\n` +
+    `args = ["mcp-atlassian@latest", "--transport", "stdio", "--toolsets", "default,jira_agile"]\n` +
+    `env = { JIRA_URL = "${JIRA_URL}", JIRA_PERSONAL_TOKEN = "${safeToken}", MCP_LOGGING_STDOUT = "false", MCP_VERBOSE = "false", MCP_VERY_VERBOSE = "false", JIRA_TIMEOUT = "120", UV_CACHE_DIR = "/tmp/uv-cache" }\n` +
+    `enabled = true\n` +
+    `startup_timeout_sec = 45\n`
+  );
+}
+
+function upsertMcpBlock(configText, token) {
+  const newBlock = makeMcpBlock(token);
+  const blockRegex = new RegExp(
+    `\\[mcp_servers\\.${MCP_SECTION.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\][\\s\\S]*?(?=\\n\\[[^\\n]+\\]|$)`,
+    'm'
+  );
+
+  if (blockRegex.test(configText)) {
+    return configText.replace(blockRegex, newBlock.trimEnd());
+  }
+
+  const featuresIndex = configText.indexOf('\n[features]');
+  if (featuresIndex >= 0) {
+    return `${configText.slice(0, featuresIndex)}\n\n${newBlock}${configText.slice(featuresIndex)}`;
+  }
+
+  return `${configText.replace(/\s*$/, '')}\n\n${newBlock}`;
+}
+
+function extractTokenFromConfig(configText) {
+  const blockRegex = new RegExp(
+    `\\[mcp_servers\\.${MCP_SECTION.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\][\\s\\S]*?(?=\\n\\[[^\\n]+\\]|$)`,
+    'm'
+  );
+  const block = configText.match(blockRegex)?.[0] || '';
+  return block.match(/JIRA_PERSONAL_TOKEN\s*=\s*"([^"]+)"/)?.[1] || '';
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || process.cwd(),
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timeoutId;
+    let killedByTimeout = false;
+
+    child.stdout.on('data', (d) => {
+      stdout += String(d);
+    });
+    child.stderr.on('data', (d) => {
+      stderr += String(d);
+    });
+
+    if (options.timeoutMs) {
+      timeoutId = setTimeout(() => {
+        killedByTimeout = true;
+        child.kill('SIGKILL');
+      }, options.timeoutMs);
+    }
+
+    child.on('close', (code, signal) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      resolve({ code, signal, stdout, stderr, killedByTimeout });
+    });
+
+    child.on('error', (err) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      resolve({
+        code: -1,
+        signal: null,
+        stdout,
+        stderr: `${stderr}\n${err.message}`,
+        killedByTimeout,
+      });
+    });
+  });
+}
+
+async function setupViaCodexExec(token) {
+  const prompt = [
+    'You are running locally on macOS.',
+    `Update ~/.codex/config.toml for [mcp_servers.${MCP_SECTION}] using:`,
+    '- command = uvx',
+    '- args = ["mcp-atlassian@latest", "--transport", "stdio", "--toolsets", "default,jira_agile"]',
+    `- JIRA_URL = "${JIRA_URL}"`,
+    `- JIRA_PERSONAL_TOKEN = "${token}"`,
+    '- MCP_LOGGING_STDOUT = "false"',
+    '- MCP_VERBOSE = "false"',
+    '- MCP_VERY_VERBOSE = "false"',
+    '- JIRA_TIMEOUT = "120"',
+    '- UV_CACHE_DIR = "/tmp/uv-cache"',
+    '- enabled = true',
+    '- startup_timeout_sec = 45',
+    'Do not ask questions. Apply changes directly. Reply with SETUP_OK only.',
+  ].join('\n');
+
+  return runCommand(
+    'codex',
+    ['exec', '--skip-git-repo-check', '-C', process.cwd(), prompt],
+    {
+      timeoutMs: 120000,
+      env: {
+        CODEX_OTEL_ENABLED: 'false',
+      },
+    }
+  );
+}
+
+async function setupViaLocalPatch(token) {
+  const codexDir = path.dirname(CONFIG_PATH);
+  await fs.mkdir(codexDir, { recursive: true });
+
+  const existing = (await fileExists(CONFIG_PATH)) ? await fs.readFile(CONFIG_PATH, 'utf8') : '';
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (existing.trim()) {
+    const backupPath = `${CONFIG_PATH}.bak.${timestamp}`;
+    await fs.writeFile(backupPath, existing, 'utf8');
+  }
+
+  const updated = upsertMcpBlock(existing || '', token);
+  await fs.writeFile(CONFIG_PATH, updated, 'utf8');
+}
+
+async function getTokenFromRequestOrConfig(tokenFromBody) {
+  if (tokenFromBody && String(tokenFromBody).trim()) {
+    return String(tokenFromBody).trim();
+  }
+
+  if (!(await fileExists(CONFIG_PATH))) return '';
+  const text = await fs.readFile(CONFIG_PATH, 'utf8');
+  return extractTokenFromConfig(text);
+}
+
+function parseJsonLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+async function runMcpHandshake(token) {
+  return new Promise((resolve) => {
+    const env = {
+      ...process.env,
+      JIRA_URL,
+      JIRA_PERSONAL_TOKEN: token,
+      MCP_LOGGING_STDOUT: 'false',
+      MCP_VERBOSE: 'false',
+      MCP_VERY_VERBOSE: 'false',
+      JIRA_TIMEOUT: '120',
+      UV_CACHE_DIR: '/tmp/uv-cache',
+    };
+
+    const child = spawn(
+      'uvx',
+      ['mcp-atlassian@latest', '--transport', 'stdio', '--toolsets', 'default,jira_agile'],
+      { env, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+
+    const startedAt = Date.now();
+    let stderr = '';
+    let initOk = false;
+
+    const rl = readline.createInterface({ input: child.stdout });
+
+    const cleanup = (result) => {
+      try {
+        rl.close();
+      } catch {}
+      if (!child.killed) child.kill('SIGKILL');
+      resolve(result);
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup({
+        ok: false,
+        initSeconds: null,
+        message: 'Timeout handshake MCP',
+        stderr: stderr.slice(-1000),
+      });
+    }, 25000);
+
+    child.stderr.on('data', (d) => {
+      stderr += String(d);
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      cleanup({
+        ok: false,
+        initSeconds: null,
+        message: err.message,
+        stderr: stderr.slice(-1000),
+      });
+    });
+
+    rl.on('line', (line) => {
+      const msg = parseJsonLine(line);
+      if (!msg) return;
+
+      if (msg.id === 1 && msg.result && !initOk) {
+        initOk = true;
+        const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`);
+        return;
+      }
+
+      if (msg.id === 2 && msg.result) {
+        clearTimeout(timeout);
+        const initSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+        const toolCount = Array.isArray(msg.result?.tools) ? msg.result.tools.length : 0;
+        cleanup({
+          ok: initOk,
+          initSeconds,
+          message: `Tools visibles: ${toolCount}`,
+          stderr: stderr.slice(-1000),
+        });
+      }
+    });
+
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'neon-webapp', version: '1.0.0' },
+        },
+      })}\n`
+    );
+  });
+}
+
+async function jiraFetchJson(token, endpoint) {
+  const url = `${JIRA_URL}${endpoint}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Jira ${res.status} on ${endpoint}: ${body.slice(0, 180)}`);
+  }
+
+  return res.json();
+}
+
+function inDateRange(dateValue) {
+  if (!dateValue) return false;
+  const dt = new Date(dateValue);
+  if (Number.isNaN(dt.getTime())) return false;
+  return dt >= WORKLOG_START && dt <= WORKLOG_END;
+}
+
+function sameUser(author, me) {
+  if (!author || !me) return false;
+
+  const left = new Set(
+    [author.name, author.key, author.emailAddress, author.accountId]
+      .filter(Boolean)
+      .map((v) => String(v).toLowerCase())
+  );
+  const right = new Set(
+    [me.name, me.key, me.emailAddress, me.accountId]
+      .filter(Boolean)
+      .map((v) => String(v).toLowerCase())
+  );
+
+  for (const v of left) {
+    if (right.has(v)) return true;
+  }
+  return false;
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = [];
+  let index = 0;
+
+  async function run() {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      results[current] = await worker(items[current], current);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+async function collectWorkedHours2025(token) {
+  const me = await jiraFetchJson(token, '/rest/api/2/myself');
+
+  const allIssues = [];
+  let startAt = 0;
+  const maxResults = 100;
+  const jql = 'worklogAuthor = currentUser() AND worklogDate >= "2025-01-01" AND worklogDate <= "2025-12-31"';
+
+  while (true) {
+    const page = await jiraFetchJson(
+      token,
+      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=project,key`
+    );
+
+    const issues = page.issues || [];
+    allIssues.push(...issues);
+
+    startAt += issues.length;
+    if (startAt >= (page.total || 0) || issues.length === 0) break;
+  }
+
+  const byProject = new Map();
+  let keptWorklogs = 0;
+
+  await mapLimit(allIssues, 8, async (issue) => {
+    const issueKey = issue.key;
+    const projectKey = issue.fields?.project?.key || 'UNKNOWN';
+    const projectName = issue.fields?.project?.name || 'Projet inconnu';
+
+    let wlStart = 0;
+    const wlMax = 1000;
+
+    while (true) {
+      const logs = await jiraFetchJson(
+        token,
+        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${wlStart}&maxResults=${wlMax}`
+      );
+
+      const worklogs = logs.worklogs || [];
+
+      for (const wl of worklogs) {
+        if (!inDateRange(wl.started)) continue;
+        if (!sameUser(wl.author, me)) continue;
+
+        keptWorklogs += 1;
+        const seconds = Number(wl.timeSpentSeconds || 0);
+        const current = byProject.get(projectKey) || {
+          projectKey,
+          projectName,
+          seconds: 0,
+        };
+        current.seconds += seconds;
+        byProject.set(projectKey, current);
+      }
+
+      wlStart += worklogs.length;
+      if (wlStart >= (logs.total || 0) || worklogs.length === 0) break;
+    }
+  });
+
+  const projects = [...byProject.values()]
+    .map((p) => ({
+      projectKey: p.projectKey,
+      projectName: p.projectName,
+      seconds: p.seconds,
+      hours: Number((p.seconds / 3600).toFixed(2)),
+    }))
+    .sort((a, b) => b.seconds - a.seconds);
+
+  const totalSeconds = projects.reduce((sum, p) => sum + p.seconds, 0);
+
+  return {
+    projects,
+    totalHours: Number((totalSeconds / 3600).toFixed(2)),
+    issueCount: allIssues.length,
+    worklogCount: keptWorklogs,
+  };
+}
+
+app.get('/api/health', (_, res) => {
+  res.json({ ok: true, port: API_PORT });
+});
+
+app.post('/api/mcp/setup', async (req, res) => {
+  const logs = [];
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!token) {
+      res.status(400).json({ error: 'Token PAT requis.' });
+      return;
+    }
+
+    logs.push('Demarrage setup MCP...');
+    logs.push('Tentative setup via codex exec...');
+
+    const codexResult = await setupViaCodexExec(token);
+    const codexOk = codexResult.code === 0;
+
+    if (codexOk) {
+      logs.push('codex exec: OK');
+    } else {
+      logs.push('codex exec: KO, bascule patch local.');
+      const tail = (codexResult.stderr || codexResult.stdout || '').trim().split('\n').slice(-2).join(' | ');
+      if (tail) logs.push(`Detail: ${tail.slice(0, 180)}`);
+      await setupViaLocalPatch(token);
+      logs.push('Patch local config: OK');
+    }
+
+    const handshake = await runMcpHandshake(token);
+    logs.push(handshake.ok ? 'Handshake MCP: OK' : 'Handshake MCP: KO');
+    if (handshake.message) logs.push(handshake.message);
+
+    res.json({ ok: handshake.ok, logs, handshake });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Erreur setup', logs });
+  }
+});
+
+app.post('/api/mcp/check', async (req, res) => {
+  const logs = [];
+  try {
+    const token = await getTokenFromRequestOrConfig(req.body?.token);
+    if (!token) {
+      res.status(400).json({ error: 'Aucun token trouve (input ou config).', logs });
+      return;
+    }
+
+    logs.push('Verification handshake MCP...');
+    const handshake = await runMcpHandshake(token);
+    logs.push(handshake.ok ? 'Handshake MCP: OK' : 'Handshake MCP: KO');
+    if (handshake.message) logs.push(handshake.message);
+
+    res.json({ ok: handshake.ok, logs, handshake });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Erreur check', logs });
+  }
+});
+
+app.post('/api/jira/report', async (req, res) => {
+  try {
+    const token = await getTokenFromRequestOrConfig(req.body?.token);
+    if (!token) {
+      res.status(400).json({ error: 'Aucun token trouve (input ou config).' });
+      return;
+    }
+
+    const report = await collectWorkedHours2025(token);
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Erreur rapport Jira 2025' });
+  }
+});
+
+app.listen(API_PORT, '127.0.0.1', () => {
+  console.log(`API ready on http://localhost:${API_PORT}`);
+});
