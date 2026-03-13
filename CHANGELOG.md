@@ -4,6 +4,20 @@ Tous les changements notables de ce projet sont listés ici.
 
 ## [Unreleased]
 
+## [1.17.3] - 2026-03-13 15:34 CET
+
+### Added
+
+- Détail projet `ROEMO` côté interface (répartition par type, sous-tâches, tickets complets, pagination).
+- Résumé des commentaires `ROEMO` (Codex + fallback heuristique), au même format que le détail `WAROE`/bench.
+- Export Excel/PDF enrichi avec les sections détaillées `ROEMO` (types, tickets, thèmes, exemples).
+
+### Changed
+
+- Collecte des projets détaillés étendue à `ROEMO` (frontend + API).
+- Génération Codex des résumés de commentaires activée pour plusieurs scopes détaillés (`BENCH_SCOPE_KEY`, `ROEMO_SCOPE_KEY`).
+- Messages de synthèse commentaires généralisés pour fonctionner par projet, pas uniquement "bench".
+
 ## [1.17.2] - 2026-03-13 15:01 CET
 
 ### Added

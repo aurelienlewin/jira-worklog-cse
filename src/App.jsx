@@ -23,7 +23,11 @@ const LEAVE_SCOPE_LABEL = String(
 const BENCH_SCOPE_KEY = String(import.meta.env.VITE_BENCH_SCOPE_KEY || 'BENCH')
   .trim()
   .toUpperCase();
-const BENCH_DETAIL_PROJECT_KEYS = [BENCH_SCOPE_KEY];
+const ROEMO_SCOPE_KEY = String(import.meta.env.VITE_ROEMO_SCOPE_KEY || 'ROEMO')
+  .trim()
+  .toUpperCase();
+const HAS_DISTINCT_ROEMO_SCOPE = Boolean(ROEMO_SCOPE_KEY && ROEMO_SCOPE_KEY !== BENCH_SCOPE_KEY);
+const DETAILED_PROJECT_KEYS = [...new Set([BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY])];
 const KOFI_URL = 'https://ko-fi.com/aurelienlewin';
 
 const STEPS = [
@@ -341,6 +345,8 @@ export default function App() {
   const [postProgressFocusTarget, setPostProgressFocusTarget] = useState('');
   const [benchSubtasksVisibleCount, setBenchSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [benchIssuesVisibleCount, setBenchIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
+  const [roemoSubtasksVisibleCount, setRoemoSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
+  const [roemoIssuesVisibleCount, setRoemoIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [leavesSubtasksVisibleCount, setLeavesSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [leavesIssuesVisibleCount, setLeavesIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const stepButtonRefs = useRef([]);
@@ -360,6 +366,7 @@ export default function App() {
   const isSummaryReady = report !== null && leaves !== null;
   const isProjectsReady = report !== null;
   const isBenchReady = report !== null;
+  const isRoemoReady = report !== null;
   const isLeavesReady = leaves !== null;
 
   const headerStatus = useMemo(() => {
@@ -393,6 +400,11 @@ export default function App() {
   const benchDetails = useMemo(() => {
     return report?.detailedProjects?.find((project) => project.projectKey === BENCH_SCOPE_KEY) || null;
   }, [report]);
+
+  const roemoDetails = useMemo(() => {
+    return report?.detailedProjects?.find((project) => project.projectKey === ROEMO_SCOPE_KEY) || null;
+  }, [report]);
+  const hasRoemoHours = Number(roemoDetails?.issueHours || 0) > 0;
 
   const leavesDetails = useMemo(() => {
     const issues = leaves?.issues || [];
@@ -428,6 +440,14 @@ export default function App() {
   const visibleBenchIssues = useMemo(
     () => (benchDetails?.issues || []).slice(0, benchIssuesVisibleCount),
     [benchDetails, benchIssuesVisibleCount]
+  );
+  const visibleRoemoSubtasks = useMemo(
+    () => (roemoDetails?.subtasks || []).slice(0, roemoSubtasksVisibleCount),
+    [roemoDetails, roemoSubtasksVisibleCount]
+  );
+  const visibleRoemoIssues = useMemo(
+    () => (roemoDetails?.issues || []).slice(0, roemoIssuesVisibleCount),
+    [roemoDetails, roemoIssuesVisibleCount]
   );
   const visibleLeavesSubtasks = useMemo(
     () => (leavesDetails?.subtasks || []).slice(0, leavesSubtasksVisibleCount),
@@ -560,6 +580,33 @@ export default function App() {
   const benchCommentSummary = useMemo(() => {
     return benchDetails?.commentSummary || null;
   }, [benchDetails]);
+
+  const roemoNarrative = useMemo(() => {
+    if (!roemoDetails?.issues?.length) {
+      return `Aucune activité ${ROEMO_SCOPE_KEY} détectée pour 2025.`;
+    }
+    const topType = roemoDetails.issueTypeTotals?.[0];
+    const topIssue = roemoDetails.issues?.[0];
+    const subtaskShare =
+      Number(roemoDetails.issueHours || 0) > 0
+        ? (Number(roemoDetails.subtaskHours || 0) / Number(roemoDetails.issueHours || 0)) * 100
+        : 0;
+    const parts = [
+      `Vous avez saisi ${formatNumber(roemoDetails.issueHours)} h sur ${roemoDetails.issueCount} tickets ${ROEMO_SCOPE_KEY}.`,
+      topType
+        ? `Le type principal est "${topType.issueType}" avec ${formatNumber(topType.hours)} h.`
+        : null,
+      `Les sous-tâches représentent ${formatPercent(subtaskShare)} du temps ${ROEMO_SCOPE_KEY}.`,
+      topIssue
+        ? `Le ticket le plus chargé est ${topIssue.issueKey} (${formatNumber(topIssue.hours)} h).`
+        : null,
+    ].filter(Boolean);
+    return parts.join(' ');
+  }, [roemoDetails]);
+
+  const roemoCommentSummary = useMemo(() => {
+    return roemoDetails?.commentSummary || null;
+  }, [roemoDetails]);
 
   function clearToastTimer(id) {
     const timers = toastTimersRef.current.get(id);
@@ -792,7 +839,7 @@ export default function App() {
       });
       const hoursData = await postJsonWithRetry('/api/worklogs/report', {
         token: activeToken,
-        detailedProjectKeys: BENCH_DETAIL_PROJECT_KEYS,
+        detailedProjectKeys: DETAILED_PROJECT_KEYS,
         userEmail: activeUserEmail || undefined,
       }, { label: 'Chargement des heures 2025', attempts: 3, signal });
 
@@ -1165,6 +1212,11 @@ export default function App() {
   }, [benchDetails]);
 
   useEffect(() => {
+    setRoemoSubtasksVisibleCount(TABLE_PAGE_SIZE);
+    setRoemoIssuesVisibleCount(TABLE_PAGE_SIZE);
+  }, [roemoDetails]);
+
+  useEffect(() => {
     setLeavesSubtasksVisibleCount(TABLE_PAGE_SIZE);
     setLeavesIssuesVisibleCount(TABLE_PAGE_SIZE);
   }, [leavesDetails, leaves]);
@@ -1284,6 +1336,13 @@ export default function App() {
         };
         headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
         sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      }
+
+      function projectSheetName(projectKey, suffix) {
+        const normalizedKey = String(projectKey || 'PROJECT').trim().toUpperCase() || 'PROJECT';
+        const normalizedSuffix = String(suffix || '').trim();
+        const candidate = normalizedSuffix ? `${normalizedKey}_${normalizedSuffix}` : normalizedKey;
+        return candidate.slice(0, 31);
       }
 
       function paintCard(sheet, startCol, startRow, title, value, subtitle, colorArgb) {
@@ -1455,6 +1514,37 @@ export default function App() {
         Commentaire: entry.comment,
       }));
       addWorksheet('Bench_Commentaires_Exemples', benchCommentHighlightsRows);
+
+      if (HAS_DISTINCT_ROEMO_SCOPE) {
+        const roemoTypeRows = (roemoDetails?.issueTypeTotals || []).map((entry) => ({
+          Type: entry.issueType,
+          Heures: Number(entry.hours || 0),
+        }));
+        addWorksheet(projectSheetName(ROEMO_SCOPE_KEY, 'Types'), roemoTypeRows);
+
+        const roemoIssueRows = (roemoDetails?.issues || []).map((issue) => ({
+          Ticket: issue.issueKey,
+          Type: issue.issueType,
+          Parent: issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '',
+          Résumé: issue.summary,
+          Heures: Number(issue.hours || 0),
+        }));
+        addWorksheet(projectSheetName(ROEMO_SCOPE_KEY, 'Tickets'), roemoIssueRows);
+
+        const roemoCommentThemeRows = (roemoCommentSummary?.themes || []).map((theme) => ({
+          Thème: theme.label,
+          Heures: Number(theme.hours || 0),
+          'Nombre de saisies': Number(theme.occurrences || 0),
+        }));
+        addWorksheet(projectSheetName(ROEMO_SCOPE_KEY, 'Commentaires_Themes'), roemoCommentThemeRows);
+
+        const roemoCommentHighlightsRows = (roemoCommentSummary?.highlights || []).map((entry) => ({
+          Ticket: entry.issueKey,
+          Heures: Number(entry.hours || 0),
+          Commentaire: entry.comment,
+        }));
+        addWorksheet(projectSheetName(ROEMO_SCOPE_KEY, 'Commentaires_Exemples'), roemoCommentHighlightsRows);
+      }
 
       const leavesTypeRows = (leavesDetails.issueTypeTotals || []).map((entry) => ({
         Type: entry.issueType,
@@ -1676,6 +1766,7 @@ export default function App() {
         <span>Utilisateur: ${escapeHtml(analysedUser)}</span>
         <span>Date export: ${escapeHtml(generatedAt)}</span>
         <span>Scope bench: ${escapeHtml(BENCH_SCOPE_KEY)}</span>
+        ${HAS_DISTINCT_ROEMO_SCOPE ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
         <span>Scope congés: ${escapeHtml(LEAVE_SCOPE_LABEL)}</span>
       </div>
     </section>
@@ -1772,6 +1863,66 @@ export default function App() {
         </div>
       </div>
     </section>
+
+    ${HAS_DISTINCT_ROEMO_SCOPE ? `
+    <section class="panel">
+      <h2>Détail projet (${escapeHtml(ROEMO_SCOPE_KEY)})</h2>
+      <p class="narrative">${escapeHtml(roemoNarrative)}</p>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            roemoDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumber(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches ${escapeHtml(ROEMO_SCOPE_KEY)}</h3>
+          ${toRows(
+            roemoDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              formatNumber(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets ${escapeHtml(ROEMO_SCOPE_KEY)}</h3>
+          ${toRows(
+            roemoDetails?.issues || [],
+            ['Ticket', 'Type', 'Parent', 'Résumé', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              issue.summary,
+              formatNumber(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires ${escapeHtml(ROEMO_SCOPE_KEY)} - thèmes</h3>
+          ${toRows(
+            roemoCommentSummary?.themes || [],
+            ['Thème', 'Heures', 'Saisies'],
+            (theme) => [theme.label, formatNumber(theme.hours), String(theme.occurrences)]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires ${escapeHtml(ROEMO_SCOPE_KEY)} - exemples</h3>
+          ${toRows(
+            roemoCommentSummary?.highlights || [],
+            ['Ticket', 'Heures', 'Commentaire'],
+            (entry) => [entry.issueKey, formatNumber(entry.hours), entry.comment]
+          )}
+        </div>
+      </div>
+    </section>
+    ` : ''}
 
     <section class="panel">
       <h2>Congés et absences (${escapeHtml(LEAVE_SCOPE_LABEL)})</h2>
@@ -2445,6 +2596,231 @@ export default function App() {
                 </>
               )}
             </section>
+
+            {HAS_DISTINCT_ROEMO_SCOPE ? (
+              <section className={`glass feedback-card reveal${isRoemoReady ? '' : ' section-pending'}`} aria-busy={!isRoemoReady}>
+                <h3>🧩 Détail projet ({ROEMO_SCOPE_KEY})</h3>
+                {!isRoemoReady ? (
+                  <p className="section-state">⏳ En attente du chargement des données {ROEMO_SCOPE_KEY}.</p>
+                ) : null}
+                <p className="bench-summary">{roemoNarrative}</p>
+                {!roemoDetails || !roemoDetails.issues?.length || !hasRoemoHours ? (
+                  <p>
+                    Aucun détail {ROEMO_SCOPE_KEY} (&gt; 0h) pour le moment.
+                  </p>
+                ) : (
+                  <>
+                    <div className="meta-row">
+                      <span>Tickets {ROEMO_SCOPE_KEY} : {roemoDetails.issueCount}</span>
+                      <span>Total {ROEMO_SCOPE_KEY} : {formatNumber(roemoDetails.issueHours)} h</span>
+                      {Number(roemoDetails.subtaskCount || 0) > 0 ? (
+                        <span>
+                          Sous-tâches : {roemoDetails.subtaskCount} ({formatNumber(roemoDetails.subtaskHours)} h)
+                        </span>
+                      ) : null}
+                      <span>
+                        Commentaires {ROEMO_SCOPE_KEY} : {roemoDetails.commentCount || 0} ({formatNumber(roemoDetails.commentHours || 0)} h)
+                      </span>
+                    </div>
+
+                    <div className="detail-grid">
+                      <article className="detail-block">
+                        <h4>🧠 Résumé Codex de vos commentaires {ROEMO_SCOPE_KEY}</h4>
+                        {!roemoCommentSummary ? (
+                          <p>Résumé indisponible pour le moment.</p>
+                        ) : (
+                          <>
+                            <p className="hint">{roemoCommentSummary.message}</p>
+                            <p className="hint">
+                              Source du résumé : {roemoCommentSummary.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local'}
+                            </p>
+                            <p className="hint">
+                              Saisies commentées : {roemoCommentSummary.commentedWorklogs || 0}
+                              {' · '}
+                              Temps couvert : {formatNumber(roemoCommentSummary.commentedHours || 0)} h
+                            </p>
+                            {!roemoCommentSummary.themes?.length ? (
+                              <p>Aucun thème clair détecté.</p>
+                            ) : (
+                              <div className="table-wrap" tabIndex="0" aria-label={`Synthèse des thèmes ${ROEMO_SCOPE_KEY}`}>
+                                <table className="neon-table">
+                                  <thead>
+                                    <tr>
+                                      <th scope="col">Thème détecté</th>
+                                      <th scope="col">Heures</th>
+                                      <th scope="col">Saisies</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {roemoCommentSummary.themes.map((theme) => (
+                                      <tr key={theme.label}>
+                                        <td>{theme.label}</td>
+                                        <td>{formatNumber(theme.hours)}</td>
+                                        <td>{theme.occurrences}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            {!roemoCommentSummary.highlights?.length ? null : (
+                              <>
+                                <h5>Exemples représentatifs</h5>
+                                <ul className="hint-list">
+                                  {roemoCommentSummary.highlights.map((entry, index) => (
+                                    <li key={`${entry.issueKey}-${index}`}>
+                                      <strong>{entry.issueKey}</strong> ({formatNumber(entry.hours)} h): {entry.comment}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </article>
+
+                      <article className="detail-block">
+                        <h4>📚 Répartition par type d'issue ({ROEMO_SCOPE_KEY})</h4>
+                        {!roemoDetails.issueTypeTotals?.length ? (
+                          <p>Pas de répartition disponible.</p>
+                        ) : (
+                          <div className="table-wrap" tabIndex="0" aria-label={`Répartition ${ROEMO_SCOPE_KEY} par type d'issue`}>
+                            <table className="neon-table">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Type d'issue</th>
+                                  <th scope="col">Heures</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {roemoDetails.issueTypeTotals.map((entry) => (
+                                  <tr key={entry.issueType}>
+                                    <td>{entry.issueType}</td>
+                                    <td>{formatNumber(entry.hours)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </article>
+
+                      {roemoDetails.subtasks?.length ? (
+                        <details className="detail-block detail-disclosure">
+                          <summary>
+                            <span className="summary-title">🧩 Sous-tâches {ROEMO_SCOPE_KEY}</span>
+                            <span className="summary-meta">{roemoDetails.subtasks.length} lignes</span>
+                            <span className="summary-state" aria-hidden="true" />
+                          </summary>
+                          <div className="disclosure-content">
+                            <p className="hint">
+                              Affichage de {visibleRoemoSubtasks.length} sur {roemoDetails.subtasks.length} lignes.
+                            </p>
+                            <div className="table-wrap" tabIndex="0" aria-label={`Sous-tâches ${ROEMO_SCOPE_KEY}`}>
+                              <table className="neon-table">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Ticket</th>
+                                    <th scope="col">Type</th>
+                                    <th scope="col">Parent</th>
+                                    <th scope="col">Heures</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {visibleRoemoSubtasks.map((issue) => (
+                                    <tr key={issue.issueKey}>
+                                      <td>
+                                        <strong>{issue.issueKey}</strong>
+                                        <br />
+                                        <span>{issue.summary}</span>
+                                      </td>
+                                      <td>{issue.issueType}</td>
+                                      <td>
+                                        {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                      </td>
+                                      <td>{formatNumber(issue.hours)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {visibleRoemoSubtasks.length < roemoDetails.subtasks.length ? (
+                              <button
+                                type="button"
+                                className="neon-btn ghost compact"
+                                onClick={() =>
+                                  setRoemoSubtasksVisibleCount((prev) => prev + nextChunkSize(prev, roemoDetails.subtasks.length))
+                                }
+                              >
+                                Afficher {nextChunkSize(visibleRoemoSubtasks.length, roemoDetails.subtasks.length)} lignes de plus
+                              </button>
+                            ) : null}
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+
+                    <details className="detail-block detail-disclosure">
+                      <summary>
+                        <span className="summary-title">🗂️ Tous les tickets {ROEMO_SCOPE_KEY} (tous types)</span>
+                        <span className="summary-meta">{roemoDetails.issues.length} lignes</span>
+                        <span className="summary-state" aria-hidden="true" />
+                      </summary>
+                      <div className="disclosure-content">
+                        {!roemoDetails.issues?.length ? (
+                          <p>Aucun ticket {ROEMO_SCOPE_KEY} avec heures en 2025.</p>
+                        ) : (
+                          <>
+                            <p className="hint">
+                              Affichage de {visibleRoemoIssues.length} sur {roemoDetails.issues.length} lignes.
+                            </p>
+                            <div className="table-wrap" tabIndex="0" aria-label={`Tous les tickets ${ROEMO_SCOPE_KEY}`}>
+                              <table className="neon-table">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Ticket</th>
+                                    <th scope="col">Type</th>
+                                    <th scope="col">Parent</th>
+                                    <th scope="col">Heures</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {visibleRoemoIssues.map((issue) => (
+                                    <tr key={issue.issueKey}>
+                                      <td>
+                                        <strong>{issue.issueKey}</strong>
+                                        <br />
+                                        <span>{issue.summary}</span>
+                                      </td>
+                                      <td>{issue.issueType}</td>
+                                      <td>
+                                        {issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-'}
+                                      </td>
+                                      <td>{formatNumber(issue.hours)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {visibleRoemoIssues.length < roemoDetails.issues.length ? (
+                              <button
+                                type="button"
+                                className="neon-btn ghost compact"
+                                onClick={() =>
+                                  setRoemoIssuesVisibleCount((prev) => prev + nextChunkSize(prev, roemoDetails.issues.length))
+                                }
+                              >
+                                Afficher {nextChunkSize(visibleRoemoIssues.length, roemoDetails.issues.length)} lignes de plus
+                              </button>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </details>
+                  </>
+                )}
+              </section>
+            ) : null}
 
             <section className={`glass feedback-card reveal${isLeavesReady ? '' : ' section-pending'}`} aria-busy={!isLeavesReady}>
               <h3>🌴 Suivi des congés et absences ({LEAVE_SCOPE_LABEL})</h3>

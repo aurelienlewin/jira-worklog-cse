@@ -129,6 +129,8 @@ const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 
 const AVATAR_FETCH_TIMEOUT_MS = Number(process.env.AVATAR_FETCH_TIMEOUT_MS || 8000);
 const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 256 * 1024);
 const BENCH_SCOPE_KEY = String(process.env.BENCH_SCOPE_KEY || 'BENCH').trim().toUpperCase();
+const ROEMO_SCOPE_KEY = String(process.env.ROEMO_SCOPE_KEY || 'ROEMO').trim().toUpperCase();
+const CODEX_SUMMARY_PROJECT_KEYS = [...new Set([BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY])].filter(Boolean);
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = String(process.env.MCP_SERVER_SECTION || 'issue-tracker').trim();
@@ -794,7 +796,9 @@ const BENCH_THEME_RULES = [
   },
 ];
 
-function summarizeBenchCommentsHeuristic(commentEntries) {
+function summarizeBenchCommentsHeuristic(commentEntries, projectKey = '') {
+  const normalizedProjectKey = String(projectKey || '').trim().toUpperCase();
+  const projectLabel = normalizedProjectKey || 'ce projet';
   const validComments = (commentEntries || [])
     .filter((entry) => Number(entry.seconds || 0) > 0)
     .map((entry) => ({
@@ -805,7 +809,7 @@ function summarizeBenchCommentsHeuristic(commentEntries) {
 
   if (!validComments.length) {
     return {
-      message: "Aucun commentaire bench exploitable n'a été trouvé dans vos saisies 2025.",
+      message: `Aucun commentaire exploitable n'a été trouvé pour ${projectLabel} dans vos saisies 2025.`,
       commentedWorklogs: 0,
       commentedHours: 0,
       themes: [],
@@ -834,10 +838,10 @@ function summarizeBenchCommentsHeuristic(commentEntries) {
     }
 
     if (!matchedTheme) {
-      const current = themeMap.get('Autres activités bench') || { seconds: 0, occurrences: 0 };
+      const current = themeMap.get('Autres activités projet') || { seconds: 0, occurrences: 0 };
       current.seconds += Number(entry.seconds || 0);
       current.occurrences += 1;
-      themeMap.set('Autres activités bench', current);
+      themeMap.set('Autres activités projet', current);
     }
 
     const dedupeKey = normalizeTextForMatch(entry.comment);
@@ -862,8 +866,8 @@ function summarizeBenchCommentsHeuristic(commentEntries) {
 
   const topThemes = themes.slice(0, 3).map((theme) => `${theme.label} (${theme.hours} h)`);
   const message = topThemes.length
-    ? `Sur le bench, vos commentaires parlent surtout de ${topThemes.join(', ')}.`
-    : "Vos commentaires bench existent, mais aucun thème dominant n'a été détecté.";
+    ? `Sur ${projectLabel}, vos commentaires parlent surtout de ${topThemes.join(', ')}.`
+    : `Vos commentaires ${projectLabel} existent, mais aucun thème dominant n'a été détecté.`;
 
   return {
     message,
@@ -939,32 +943,32 @@ function buildCodexBenchPrompt(projectKey, comments, heuristicSummary) {
     .join('\n');
 
   const context = [
-    `Projet bench: ${projectKey}`,
+    `Projet: ${projectKey}`,
     `Saisies commentées: ${heuristicSummary.commentedWorklogs}`,
     `Heures commentées: ${heuristicSummary.commentedHours}`,
   ].join('\n');
 
   return [
-    'Tu es Codex. Tu aides une personne à expliquer clairement son activité bench en français.',
-    "Objectif: résumer le type d'activités bench réellement décrit dans les commentaires ci-dessous.",
+    'Tu es Codex. Tu aides une personne à expliquer clairement son activité projet en français.',
+    `Objectif: résumer le type d'activités réellement décrit pour le projet ${projectKey} dans les commentaires ci-dessous.`,
     'Contraintes:',
     '- Français simple, concret, humain, sans jargon technique.',
     '- Pas de jugement, pas de spéculation.',
     '- Résume seulement ce qui est présent dans les commentaires.',
     '- Réponds UNIQUEMENT en JSON strict.',
     'Format JSON attendu:',
-    '{"message":"string","themes":[{"label":"string","hours":0,"occurrences":0}],"highlights":[{"issueKey":"BENCH-1","hours":0,"comment":"string"}]}',
+    '{"message":"string","themes":[{"label":"string","hours":0,"occurrences":0}],"highlights":[{"issueKey":"PROJECT-1","hours":0,"comment":"string"}]}',
     '',
     'Contexte:',
     context,
     '',
-    'Commentaires bench:',
+    'Commentaires projet:',
     compactComments || '(aucun commentaire exploitable)',
   ].join('\n');
 }
 
 async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
-  const heuristic = summarizeBenchCommentsHeuristic(commentEntries);
+  const heuristic = summarizeBenchCommentsHeuristic(commentEntries, projectKey);
   if (!heuristic.commentedWorklogs) return heuristic;
 
   const sortedEntries = [...(commentEntries || [])]
@@ -1353,7 +1357,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
           const right = new Date(b.started || 0).getTime();
           return right - left;
         });
-      const commentSummary = summarizeBenchCommentsHeuristic(commentEntries);
+      const commentSummary = summarizeBenchCommentsHeuristic(commentEntries, project.projectKey);
       return {
         projectKey: project.projectKey,
         projectName: project.projectName,
@@ -1387,7 +1391,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
       commentCount: 0,
       commentHours: 0,
       commentSummary: {
-        message: "Aucun commentaire bench exploitable n'a été trouvé dans vos saisies 2025.",
+        message: `Aucun commentaire exploitable n'a été trouvé pour ${projectKey} dans vos saisies 2025.`,
         commentedWorklogs: 0,
         commentedHours: 0,
         themes: [],
@@ -1402,7 +1406,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   await mapLimit(detailedProjects, 2, async (project) => {
     const entries = Array.isArray(project._commentEntries) ? project._commentEntries : [];
     if (!entries.length) return;
-    if (project.projectKey !== BENCH_SCOPE_KEY) return;
+    if (!CODEX_SUMMARY_PROJECT_KEYS.includes(project.projectKey)) return;
 
     const codexSummary = await summarizeBenchCommentsWithCodex(project.projectKey, entries);
     project.commentSummary = codexSummary;

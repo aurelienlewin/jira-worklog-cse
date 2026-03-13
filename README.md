@@ -13,6 +13,7 @@ Application locale (React + Node.js) pour visualiser simplement les heures 2025,
 - masque les blocs résumé/détail bench et congés quand le total est à 0h,
 - affiche un taux bench et un taux d'utilisation,
 - propose des détails (types d'issue, sous-tâches, tickets complets),
+- propose des détails projet pour le scope bench et pour `ROEMO` (types d'issue, sous-tâches, tickets complets),
 - masque les sections "Sous-tâches" lorsqu'elles sont vides,
 - affiche l'avatar de l'utilisateur analysé (si disponible),
 - renforce la récupération de l'avatar (normalisation + fallback image embarquée),
@@ -88,12 +89,14 @@ VITE_TOKEN_HELP_URL="https://example.com/token"
 VITE_SETUP_GUIDE_URL="https://example.com/guide"
 VITE_ISSUE_BROWSE_BASE_URL="https://example.com"
 VITE_BENCH_SCOPE_KEY="BENCH"
+VITE_ROEMO_SCOPE_KEY="ROEMO"
 VITE_LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
 VITE_LEAVE_SCOPE_LABEL="ABS-*"
 
 # API
 ISSUE_TRACKER_URL="https://example.com"
 BENCH_SCOPE_KEY="BENCH"
+ROEMO_SCOPE_KEY="ROEMO"
 LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
 WORKING_DAY_HOURS="7"
 MCP_SERVER_SECTION="issue-tracker"
