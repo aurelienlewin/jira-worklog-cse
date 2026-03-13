@@ -11,6 +11,49 @@ const app = express();
 const API_PORT = Number(process.env.API_PORT || 8787);
 const DEFAULT_TRACKER_URL = 'https://example.com';
 
+function parseCliLaunchOptions(argv = process.argv.slice(2)) {
+  const options = {
+    token: '',
+    userEmail: '',
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = String(argv[index] || '');
+    if (!arg) continue;
+
+    if (arg === '-t' || arg === '--token') {
+      const raw = String(argv[index + 1] || '').trim();
+      if (raw) {
+        options.token = raw;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--token=')) {
+      options.token = String(arg.slice('--token='.length) || '').trim();
+      continue;
+    }
+
+    if (arg === '-u' || arg === '--user') {
+      const raw = String(argv[index + 1] || '').trim();
+      if (raw) {
+        options.userEmail = raw;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--user=')) {
+      options.userEmail = String(arg.slice('--user='.length) || '').trim();
+    }
+  }
+
+  return options;
+}
+
+const CLI_LAUNCH_OPTIONS = parseCliLaunchOptions();
+
 function parseDotenvLine(rawLine) {
   const line = String(rawLine || '').trim();
   if (!line || line.startsWith('#')) return null;
@@ -1550,6 +1593,18 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
 
 app.get('/api/health', (_, res) => {
   res.json({ ok: true, port: API_PORT });
+});
+
+app.get('/api/bootstrap', (_, res) => {
+  const token = String(CLI_LAUNCH_OPTIONS.token || '').trim();
+  const userEmail = String(CLI_LAUNCH_OPTIONS.userEmail || '').trim();
+  const shouldAutoLaunch = Boolean(token);
+  res.json({
+    token,
+    userEmail,
+    shouldAutoLaunch,
+    targetStep: shouldAutoLaunch ? 4 : null,
+  });
 });
 
 app.post('/api/mcp/setup', async (req, res) => {

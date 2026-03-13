@@ -4,6 +4,17 @@ Tous les changements notables de ce projet sont listés ici.
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-03-13 15:01 CET
+
+### Added
+
+- Paramètres CLI au démarrage API: `-t/--token` et `-u/--user`.
+- Endpoint de bootstrap (`GET /api/bootstrap`) pour transmettre les paramètres de lancement à l'interface.
+
+### Changed
+
+- Initialisation frontend: si un token CLI est fourni, l'application ouvre directement l'étape 4, lance automatiquement la vérification de connexion puis la collecte des données.
+
 ## [1.17.1] - 2026-03-13 14:59 CET
 
 ### Fixed

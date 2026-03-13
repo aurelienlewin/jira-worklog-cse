@@ -57,6 +57,25 @@ npm run dev
 - Frontend: `http://localhost:5173`
 - API: `http://127.0.0.1:8787`
 
+## Démarrage direct en étape 4 (CLI)
+
+Vous pouvez lancer l'API avec un token et un e-mail cible pour ouvrir directement l'étape 4 au chargement de la page:
+
+```bash
+npm start -- -u user@domain.com -t <votre_token>
+```
+
+Équivalents supportés:
+
+- `--user user@domain.com` ou `--user=user@domain.com`
+- `--token <votre_token>` ou `--token=<votre_token>`
+
+En mode développement API seul:
+
+```bash
+npm run dev:api -- -u user@domain.com -t <votre_token>
+```
+
 ## Variables recommandées
 
 Copier `.env.example` vers `.env.local` puis adapter les valeurs:

@@ -349,6 +349,7 @@ export default function App() {
   const connectionResultRef = useRef(null);
   const summarySectionRef = useRef(null);
   const reportProgressRef = useRef(null);
+  const didInitRef = useRef(false);
   const activeRequestControllerRef = useRef(null);
   const dataContextRef = useRef('');
 
@@ -655,6 +656,24 @@ export default function App() {
 
   function isStepLocked(index) {
     return index === 3 && !connectionOk;
+  }
+
+  async function readBootstrapLaunchConfig() {
+    if (typeof window === 'undefined') return null;
+    try {
+      const response = await fetch('/api/bootstrap', { method: 'GET', cache: 'no-store' });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const tokenFromCli = String(payload?.token || '').trim();
+      const userEmailFromCli = String(payload?.userEmail || '').trim();
+      return {
+        token: tokenFromCli,
+        userEmail: userEmailFromCli,
+        shouldAutoLaunch: Boolean(payload?.shouldAutoLaunch && tokenFromCli),
+      };
+    } catch {
+      return null;
+    }
   }
 
   function startAutoProgressTicker(options = {}) {
@@ -998,45 +1017,70 @@ export default function App() {
   }
 
   useEffect(() => {
-    const savedToken = readStoredValue(TOKEN_SESSION_KEY);
-    const savedUserEmail = readStoredValue(USER_EMAIL_SESSION_KEY);
-    setTargetEmail(savedUserEmail);
-    if (!savedToken) return;
+    if (didInitRef.current) return undefined;
+    didInitRef.current = true;
 
-    setToken(savedToken);
-    addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
-    const contextKey = buildDataContextKey(savedToken, savedUserEmail);
-    const cachedContext = readSessionJson(SESSION_DATA_CONTEXT_KEY);
-    const contextMatches =
-      cachedContext?.version === SESSION_DATA_CACHE_VERSION &&
-      cachedContext?.key === contextKey;
-    const cachedConnection = contextMatches ? readSessionJson(SESSION_CONNECTION_KEY) : null;
-    const cachedReport = contextMatches ? readSessionJson(SESSION_REPORT_KEY) : null;
-    const cachedLeaves = contextMatches ? readSessionJson(SESSION_LEAVES_KEY) : null;
+    let cancelled = false;
+    const init = async () => {
+      const bootstrap = await readBootstrapLaunchConfig();
+      if (cancelled) return;
 
-    if (contextMatches) {
-      dataContextRef.current = contextKey;
-    }
+      if (bootstrap?.shouldAutoLaunch) {
+        const launchToken = bootstrap.token;
+        const launchEmail = bootstrap.userEmail;
+        setToken(launchToken);
+        setTargetEmail(launchEmail);
+        goToStep(3, { force: true });
+        addToast('ℹ️ Paramètres de lancement détectés. Vérification automatique en cours...', 'info');
+        await runCheck(launchToken, { userEmail: launchEmail, forceDataLoad: true });
+        return;
+      }
 
-    if (cachedConnection) {
-      setConnection(cachedConnection);
-    }
+      const savedToken = readStoredValue(TOKEN_SESSION_KEY);
+      const savedUserEmail = readStoredValue(USER_EMAIL_SESSION_KEY);
+      setTargetEmail(savedUserEmail);
+      if (!savedToken) return;
 
-    if (cachedReport && cachedLeaves) {
-      setReport(cachedReport);
-      setLeaves(cachedLeaves);
-      goToStep(3, { force: true });
-      addToast('ℹ️ Données restaurées depuis la session (pas de nouvelle collecte).', 'info');
-      return;
-    }
+      setToken(savedToken);
+      addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
+      const contextKey = buildDataContextKey(savedToken, savedUserEmail);
+      const cachedContext = readSessionJson(SESSION_DATA_CONTEXT_KEY);
+      const contextMatches =
+        cachedContext?.version === SESSION_DATA_CACHE_VERSION &&
+        cachedContext?.key === contextKey;
+      const cachedConnection = contextMatches ? readSessionJson(SESSION_CONNECTION_KEY) : null;
+      const cachedReport = contextMatches ? readSessionJson(SESSION_REPORT_KEY) : null;
+      const cachedLeaves = contextMatches ? readSessionJson(SESSION_LEAVES_KEY) : null;
 
-    if (cachedConnection?.ok) {
-      goToStep(3, { force: true });
-      addToast('ℹ️ Session restaurée. Rafraîchissez manuellement les données si nécessaire.', 'info');
-      return;
-    }
+      if (contextMatches) {
+        dataContextRef.current = contextKey;
+      }
 
-    goToStep(2, { force: true });
+      if (cachedConnection) {
+        setConnection(cachedConnection);
+      }
+
+      if (cachedReport && cachedLeaves) {
+        setReport(cachedReport);
+        setLeaves(cachedLeaves);
+        goToStep(3, { force: true });
+        addToast('ℹ️ Données restaurées depuis la session (pas de nouvelle collecte).', 'info');
+        return;
+      }
+
+      if (cachedConnection?.ok) {
+        goToStep(3, { force: true });
+        addToast('ℹ️ Session restaurée. Rafraîchissez manuellement les données si nécessaire.', 'info');
+        return;
+      }
+
+      goToStep(2, { force: true });
+    };
+
+    init();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
