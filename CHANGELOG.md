@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.10] - 2026-03-13 13:20 CET
+
+### Changed
+
+- Restored toast notifications as floating overlays (fixed bottom-right on desktop, fixed bottom on mobile) instead of inline/sticky layout.
+
 ## [1.16.9] - 2026-03-13 13:17 CET
 
 ### Changed

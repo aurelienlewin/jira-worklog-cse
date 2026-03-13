@@ -189,16 +189,17 @@ body,
 }
 
 .toast-stack {
-  position: sticky;
-  top: 12px;
-  z-index: 20;
-  margin: 0 auto 12px;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 80;
   display: grid;
   gap: 8px;
-  width: min(980px, 100%);
-  max-height: 38vh;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(46vh, 420px);
   overflow: auto;
   scrollbar-gutter: stable;
+  pointer-events: none;
 }
 
 .toast {
@@ -211,6 +212,7 @@ body,
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: start;
+  pointer-events: auto;
 }
 
 .toast-toolbar {
@@ -222,6 +224,7 @@ body,
   border: 1px solid rgba(145, 170, 118, 0.28);
   background: rgba(255, 255, 255, 0.88);
   padding: 8px 10px;
+  pointer-events: auto;
 }
 
 .toast-toolbar strong {
@@ -865,8 +868,11 @@ label {
   }
 
   .toast-stack {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
     width: auto;
-    max-height: 42vh;
+    max-height: 40vh;
   }
 
   .progress-dashboard,
