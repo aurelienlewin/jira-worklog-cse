@@ -763,6 +763,10 @@ label {
   color: #5a7550;
 }
 
+.support-footer .neon-btn {
+  margin-top: 18px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;

@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.7] - 2026-03-13 13:12 CET
+
+### Changed
+
+- Increased top spacing above the Ko-fi CTA button in the support footer for better visual breathing room.
+
 ## [1.16.6] - 2026-03-13 13:11 CET
 
 ### Changed
