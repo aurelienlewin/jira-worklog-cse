@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.12] - 2026-03-13 13:25 CET
+
+### Changed
+
+- Added automatic toast lifecycle with independent timers: fade-out transition and auto-clear after a few seconds.
+- Improved multi-toast handling with capped queue, safe timer cleanup, and graceful manual close animation.
+
 ## [1.16.11] - 2026-03-13 13:23 CET
 
 ### Fixed

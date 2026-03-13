@@ -28,6 +28,8 @@ const ACTION_LABELS = {
 const TABLE_PAGE_SIZE = 60;
 const API_RETRY_ATTEMPTS = 3;
 const API_RETRY_DELAY_MS = 900;
+const TOAST_TTL_MS = 6000;
+const TOAST_FADE_MS = 320;
 
 function readStoredValue(key) {
   if (typeof window === 'undefined') return '';
@@ -81,7 +83,7 @@ function formatPercent(value) {
 
 function makeToast(message, tone = 'info') {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return { id, message, tone };
+  return { id, message, tone, exiting: false };
 }
 
 function clampPercent(value) {
@@ -130,6 +132,7 @@ export default function App() {
   const [leavesSubtasksVisibleCount, setLeavesSubtasksVisibleCount] = useState(TABLE_PAGE_SIZE);
   const [leavesIssuesVisibleCount, setLeavesIssuesVisibleCount] = useState(TABLE_PAGE_SIZE);
   const stepButtonRefs = useRef([]);
+  const toastTimersRef = useRef(new Map());
 
   const isBusy = Boolean(busyAction);
   const canGoNext = step < STEPS.length - 1;
@@ -290,11 +293,48 @@ export default function App() {
     return benchDetails?.commentSummary || null;
   }, [benchDetails]);
 
-  function addToast(message, tone = 'info') {
+  function clearToastTimer(id) {
+    const timers = toastTimersRef.current.get(id);
+    if (!timers) return;
+    if (timers.dismissTimer) clearTimeout(timers.dismissTimer);
+    if (timers.removeTimer) clearTimeout(timers.removeTimer);
+    toastTimersRef.current.delete(id);
+  }
+
+  function clearAllToastTimers() {
+    for (const id of toastTimersRef.current.keys()) {
+      clearToastTimer(id);
+    }
+  }
+
+  function scheduleToastDismiss(id, ttlMs = TOAST_TTL_MS) {
+    clearToastTimer(id);
+    const dismissTimer = setTimeout(() => {
+      setToasts((prev) =>
+        prev.map((toast) => (toast.id === id ? { ...toast, exiting: true } : toast))
+      );
+      const removeTimer = setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+        clearToastTimer(id);
+      }, TOAST_FADE_MS);
+      toastTimersRef.current.set(id, { dismissTimer, removeTimer });
+    }, ttlMs);
+    toastTimersRef.current.set(id, { dismissTimer });
+  }
+
+  function addToast(message, tone = 'info', options = {}) {
+    const ttlMs = Math.max(1200, Number(options.ttlMs || TOAST_TTL_MS));
+    const toast = makeToast(message, tone);
     setToasts((prev) => {
-      const next = [...prev, makeToast(message, tone)];
+      const next = [...prev, toast];
+      const overflow = next.length - 8;
+      if (overflow > 0) {
+        const removed = next.slice(0, overflow);
+        for (const stale of removed) clearToastTimer(stale.id);
+      }
       return next.slice(-8);
     });
+    scheduleToastDismiss(toast.id, ttlMs);
   }
 
   function addProgressToasts(lines) {
@@ -304,12 +344,29 @@ export default function App() {
   }
 
   function dismissToast(id) {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    const existing = toasts.find((toast) => toast.id === id);
+    if (!existing) return;
+    clearToastTimer(id);
+    setToasts((prev) =>
+      prev.map((toast) => (toast.id === id ? { ...toast, exiting: true } : toast))
+    );
+    const removeTimer = setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      clearToastTimer(id);
+    }, TOAST_FADE_MS);
+    toastTimersRef.current.set(id, { removeTimer });
   }
 
   function dismissAllToasts() {
+    clearAllToastTimers();
     setToasts([]);
   }
+
+  useEffect(() => {
+    return () => {
+      clearAllToastTimers();
+    };
+  }, []);
 
   async function postJson(url, payload) {
     let response;
@@ -879,7 +936,7 @@ export default function App() {
           </div>
         ) : null}
         {toasts.map((toast) => (
-          <div key={toast.id} className={`toast toast-${toast.tone}`}>
+          <div key={toast.id} className={`toast toast-${toast.tone}${toast.exiting ? ' is-exiting' : ''}`}>
             <p>{toast.message}</p>
             <button type="button" onClick={() => dismissToast(toast.id)} aria-label="Fermer">
               ✕

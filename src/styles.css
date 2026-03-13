@@ -213,6 +213,15 @@ body,
   gap: 8px;
   align-items: start;
   pointer-events: auto;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.32s ease, transform 0.32s ease;
+}
+
+.toast.is-exiting {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
 }
 
 .toast-toolbar {
