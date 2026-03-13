@@ -316,6 +316,7 @@ export default function App() {
   const stepContentRef = useRef(null);
   const connectionResultRef = useRef(null);
   const summarySectionRef = useRef(null);
+  const reportProgressRef = useRef(null);
   const activeRequestControllerRef = useRef(null);
   const dataContextRef = useRef('');
 
@@ -889,6 +890,45 @@ export default function App() {
   }, [token, targetEmail]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !reportProgress.active) return undefined;
+
+    const focusProgress = () => {
+      const progressEl = reportProgressRef.current;
+      if (!progressEl) return;
+      if (document.activeElement === progressEl) return;
+      try {
+        progressEl.focus({ preventScroll: true });
+      } catch {
+        progressEl.focus();
+      }
+    };
+
+    const frame = window.requestAnimationFrame(focusProgress);
+
+    const handleFocusIn = (event) => {
+      const progressEl = reportProgressRef.current;
+      if (!progressEl) return;
+      if (event.target instanceof Node && progressEl.contains(event.target)) return;
+      focusProgress();
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Tab') return;
+      event.preventDefault();
+      focusProgress();
+    };
+
+    document.addEventListener('focusin', handleFocusIn, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('focusin', handleFocusIn, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [reportProgress.active]);
+
+  useEffect(() => {
     setBenchSubtasksVisibleCount(TABLE_PAGE_SIZE);
     setBenchIssuesVisibleCount(TABLE_PAGE_SIZE);
   }, [benchDetails]);
@@ -1256,7 +1296,13 @@ export default function App() {
       ) : null}
 
       {reportProgress.active ? (
-        <div className="glass data-progress reveal" role="status" aria-live="polite">
+        <div
+          ref={reportProgressRef}
+          tabIndex="-1"
+          className="glass data-progress reveal"
+          role="status"
+          aria-live="polite"
+        >
           <div className="data-progress-top">
             <strong>Progression de la collecte</strong>
             <span>{Math.round(reportProgress.value)}%</span>
