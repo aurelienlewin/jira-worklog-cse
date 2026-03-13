@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.16.13] - 2026-03-13 13:32 CET
+
+### Changed
+
+- Improved stepper visual states: active step now stands out more strongly, completed steps are clearer, and locked/unavailable steps show explicit visual lock treatment and helper text.
+- Added step gating UX for step 4 (connection required), including contextual toast feedback when trying to access it too early.
+- Added clear “not ready yet” visual state for data sections (summary/projects/bench/leaves) before report data is loaded.
+
 ## [1.16.12] - 2026-03-13 13:25 CET
 
 ### Changed

@@ -138,6 +138,10 @@ export default function App() {
   const canGoNext = step < STEPS.length - 1;
   const canGoPrev = step > 0;
   const connectionOk = Boolean(connection?.ok);
+  const isSummaryReady = report !== null && leaves !== null;
+  const isProjectsReady = report !== null;
+  const isBenchReady = report !== null;
+  const isLeavesReady = leaves !== null;
 
   const headerStatus = useMemo(() => {
     if (isBusy) return ACTION_LABELS[busyAction] || '⏳ Traitement en cours...';
@@ -362,6 +366,10 @@ export default function App() {
     setToasts([]);
   }
 
+  function isStepLocked(index) {
+    return index === 3 && !connectionOk;
+  }
+
   useEffect(() => {
     return () => {
       clearAllToastTimers();
@@ -579,6 +587,12 @@ export default function App() {
 
   function goToStep(nextStepIndex) {
     if (step === nextStepIndex) return;
+    if (isStepLocked(nextStepIndex)) {
+      addToast("🔒 L'étape 4 sera disponible après la vérification de la connexion (étape 3).", 'info', {
+        ttlMs: 4200,
+      });
+      return;
+    }
     dismissAllToasts();
     setStep(nextStepIndex);
   }
@@ -950,24 +964,35 @@ export default function App() {
           <p className="step-count">
             Étape {step + 1} / {STEPS.length}
           </p>
+          {isStepLocked(3) ? (
+            <p className="stepper-hint">🔒 L'étape 4 se débloque après une connexion validée.</p>
+          ) : null}
           <ol>
-            {STEPS.map((item, index) => (
-              <li key={item.id} className={index === step ? 'active' : index < step ? 'done' : ''}>
+            {STEPS.map((item, index) => {
+              const isLocked = isStepLocked(index);
+              const baseClass = index === step ? 'active' : index < step ? 'done' : '';
+              const className = `${baseClass}${isLocked ? ' locked' : ''}`.trim();
+              return (
+              <li key={item.id} className={className}>
                 <button
                   ref={(el) => {
                     stepButtonRefs.current[index] = el;
                   }}
                   type="button"
                   disabled={isBusy}
+                  aria-disabled={isLocked ? 'true' : undefined}
                   aria-current={index === step ? 'step' : undefined}
+                  title={isLocked ? "Étape indisponible: vérifiez d'abord la connexion." : undefined}
                   onClick={() => goToStep(index)}
                   onKeyDown={(event) => handleStepKeyDown(event, index)}
                 >
                   <span>{index + 1}</span>
                   <strong>{item.title}</strong>
+                  {isLocked ? <small className="step-note">Connexion requise</small> : null}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </section>
 
@@ -978,7 +1003,12 @@ export default function App() {
             <button type="button" className="neon-btn ghost" onClick={prevStep} disabled={!canGoPrev || isBusy}>
               Étape précédente
             </button>
-            <button type="button" className="neon-btn" onClick={nextStep} disabled={!canGoNext || isBusy}>
+            <button
+              type="button"
+              className="neon-btn"
+              onClick={nextStep}
+              disabled={!canGoNext || isBusy || isStepLocked(step + 1)}
+            >
               Étape suivante
             </button>
           </div>
@@ -986,8 +1016,11 @@ export default function App() {
 
         {step === 3 ? (
           <>
-            <section className="glass feedback-card reveal">
+            <section className={`glass feedback-card reveal${isSummaryReady ? '' : ' section-pending'}`} aria-busy={!isSummaryReady}>
               <h3>🧮 Résumé 2025</h3>
+              {!isSummaryReady ? (
+                <p className="section-state">⏳ Cette section se remplit après le chargement des données 2025.</p>
+              ) : null}
               <div className={`account-badge ${analysisInfo.fallback ? 'warn' : analysisInfo.delegated ? 'info' : 'ok'}`}>
                 <strong>Compte analysé : {analysisInfo.resolvedEmail}</strong>
                 <span>{analysisInfo.message}</span>
@@ -1039,8 +1072,11 @@ export default function App() {
               </div>
             </section>
 
-            <section className="glass feedback-card reveal">
+            <section className={`glass feedback-card reveal${isProjectsReady ? '' : ' section-pending'}`} aria-busy={!isProjectsReady}>
               <h3>📌 Heures par projet (2025)</h3>
+              {!isProjectsReady ? (
+                <p className="section-state">⏳ En attente du chargement des heures par projet.</p>
+              ) : null}
               {!report?.projects?.length ? (
                 <p>Pas encore de résultat. Cliquez sur "Charger / rafraîchir mes données 2025".</p>
               ) : (
@@ -1078,8 +1114,11 @@ export default function App() {
               )}
             </section>
 
-            <section className="glass feedback-card reveal">
+            <section className={`glass feedback-card reveal${isBenchReady ? '' : ' section-pending'}`} aria-busy={!isBenchReady}>
               <h3>🧱 Détail du bench ({BENCH_PROJECT_KEY})</h3>
+              {!isBenchReady ? (
+                <p className="section-state">⏳ En attente du chargement des données bench.</p>
+              ) : null}
               <p className="bench-summary">{benchNarrative}</p>
               {!benchDetails ? (
                 <p>
@@ -1301,8 +1340,11 @@ export default function App() {
               )}
             </section>
 
-            <section className="glass feedback-card reveal">
+            <section className={`glass feedback-card reveal${isLeavesReady ? '' : ' section-pending'}`} aria-busy={!isLeavesReady}>
               <h3>🌴 Suivi des congés et absences ({LEAVES_SCOPE_LABEL})</h3>
+              {!isLeavesReady ? (
+                <p className="section-state">⏳ En attente du chargement des congés et absences.</p>
+              ) : null}
               {!leaves?.issues?.length ? (
                 <p>Pas de congés/absences chargés pour le moment.</p>
               ) : (

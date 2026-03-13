@@ -313,6 +313,16 @@ body,
   color: var(--muted);
 }
 
+.stepper-hint {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(184, 141, 65, 0.35);
+  background: rgba(255, 246, 226, 0.82);
+  color: #6a5224;
+  font-size: 14px;
+}
+
 .stepper ol {
   list-style: none;
   margin: 0;
@@ -366,8 +376,14 @@ body,
 }
 
 .stepper li.active button {
-  border-color: rgba(131, 166, 102, 0.6);
-  box-shadow: 0 6px 16px rgba(134, 156, 104, 0.16);
+  border-color: #5f8147;
+  border-width: 2px;
+  background: rgba(236, 247, 221, 0.96);
+  box-shadow: 0 0 0 2px rgba(129, 164, 99, 0.22);
+}
+
+.stepper li.done button {
+  background: rgba(245, 252, 235, 0.88);
 }
 
 .stepper li.done button span {
@@ -376,12 +392,52 @@ body,
   background: rgba(229, 245, 206, 0.82);
 }
 
+.stepper li.locked button {
+  border-style: dashed;
+  border-color: rgba(157, 165, 145, 0.62);
+  background: rgba(244, 246, 242, 0.9);
+  cursor: not-allowed;
+}
+
+.stepper li.locked button strong,
+.stepper li.locked button small {
+  color: #6e7769;
+}
+
+.stepper li.locked button span {
+  border-style: dashed;
+  border-color: rgba(145, 153, 137, 0.58);
+  color: #70786b;
+  background: rgba(251, 252, 250, 0.88);
+}
+
+.step-note {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .step-card,
 .nav-card,
 .feedback-card {
   border-radius: 14px;
   padding: 18px;
   contain: layout paint;
+}
+
+.section-pending {
+  border-style: dashed;
+  border-color: rgba(154, 163, 143, 0.55);
+  background: linear-gradient(180deg, rgba(249, 250, 247, 0.9), rgba(245, 247, 242, 0.88));
+}
+
+.section-state {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(157, 165, 145, 0.42);
+  background: rgba(248, 250, 244, 0.84);
+  color: #5e695a;
+  font-size: 14px;
 }
 
 .step-card h2,
