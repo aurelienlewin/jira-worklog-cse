@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-13 11:40 CET
+
+### Changed
+
+- Replaced technical and cryptic UI labels/messages with clearer plain-language French text.
+- Simplified setup/check feedback wording from the API so non-technical users see understandable status updates.
+
 ## [1.4.0] - 2026-03-13 11:33 CET
 
 ### Added

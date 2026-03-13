@@ -7,14 +7,14 @@ const CODEX_GUIDE_URL =
 const DETAILED_PROJECT_KEYS = ['OSFO', 'ROEMO'];
 
 const STEPS = [
-  { id: 'pat', title: 'Creer votre PAT Jira' },
+  { id: 'pat', title: "Creer votre cle d'acces Jira" },
   { id: 'guide', title: 'Lire le guide Codex' },
-  { id: 'setup', title: 'Configurer la connexion' },
+  { id: 'setup', title: 'Lancer la configuration automatique' },
   { id: 'report', title: 'Voir vos heures 2025' },
 ];
 
 const ACTION_LABELS = {
-  setup: 'Configuration Codex + MCP en cours...',
+  setup: 'Configuration automatique en cours...',
   check: 'Verification de la connexion en cours...',
   report: 'Recuperation des heures 2025 en cours...',
 };
@@ -42,8 +42,8 @@ export default function App() {
 
   const headerStatus = useMemo(() => {
     if (isBusy) return ACTION_LABELS[busyAction] || 'Traitement en cours...';
-    if (connectionOk) return 'Connexion MCP validee';
-    if (connection && !connection.ok) return 'Connexion MCP a corriger';
+    if (connectionOk) return 'Connexion validee';
+    if (connection && !connection.ok) return 'Connexion a corriger';
     return 'Suivez les etapes une par une';
   }, [busyAction, connection, connectionOk, isBusy]);
 
@@ -60,7 +60,7 @@ export default function App() {
 
   async function runSetup() {
     if (!token.trim()) {
-      setError('Veuillez coller votre PAT Jira pour continuer.');
+      setError("Veuillez coller votre cle d'acces Jira pour continuer.");
       return;
     }
 
@@ -134,15 +134,15 @@ export default function App() {
     if (step === 0) {
       return (
         <section className="glass step-card reveal">
-          <h2>Etape 1: creer votre token PAT Jira</h2>
+          <h2>Etape 1: creer votre cle d'acces Jira</h2>
           <p>
-            Cliquez sur le bouton ci-dessous, creez un token puis revenez ici.
+            Cliquez sur le bouton ci-dessous, creez un token d'acces personnel puis revenez ici.
             Vous le collerez a l'etape suivante.
           </p>
           <a className="neon-btn" href={PAT_URL} target="_blank" rel="noreferrer">
-            Ouvrir la page PAT Jira
+            Ouvrir la page de creation du token
           </a>
-          <p className="hint">Astuce: donnez un nom clair au token, ex: "Jira Worklog CSE".</p>
+          <p className="hint">Astuce: donnez un nom clair au token, par exemple "Jira Worklog CSE".</p>
         </section>
       );
     }
@@ -166,38 +166,35 @@ export default function App() {
       return (
         <section className="glass step-card reveal">
           <h2>Etape 3: configurer et verifier la connexion</h2>
-          <label htmlFor="pat-token">Collez votre PAT Jira</label>
+          <label htmlFor="pat-token">Collez votre cle d'acces Jira</label>
           <textarea
             id="pat-token"
             rows="4"
             className="token-input"
-            placeholder="Coller votre token ici"
+            placeholder="Coller votre cle ici"
             value={token}
             onChange={(event) => setToken(event.target.value)}
           />
 
           <div className="actions">
             <button type="button" className="neon-btn" onClick={runSetup} disabled={isBusy}>
-              {busyAction === 'setup' ? 'Configuration...' : 'Configurer Codex + MCP'}
+              {busyAction === 'setup' ? 'Configuration...' : 'Lancer la configuration automatique'}
             </button>
             <button type="button" className="neon-btn ghost" onClick={runCheck} disabled={isBusy}>
-              {busyAction === 'check'
-                ? 'Verification...'
-                : 'Je suis deja configure, verifier'}
+              {busyAction === 'check' ? 'Verification...' : 'Verifier ma configuration actuelle'}
             </button>
           </div>
 
           {connection ? (
             <p className={connection.ok ? 'ok-line' : 'error-line'}>
-              Resultat connexion: {connection.ok ? 'OK' : 'KO'}
+              Resultat de la connexion: {connection.ok ? 'Reussie' : 'Echec'}
               {connection.initSeconds ? ` (${connection.initSeconds}s)` : ''}
               {connection.message ? ` - ${connection.message}` : ''}
             </p>
           ) : null}
 
           <p className="hint">
-            Le setup utilise <code>codex exec</code>, puis applique automatiquement une correction locale
-            si necessaire.
+            L'application essaie automatiquement plusieurs methodes jusqu'a ce que la connexion fonctionne.
           </p>
         </section>
       );
@@ -219,7 +216,7 @@ export default function App() {
           {busyAction === 'report' ? 'Chargement des heures...' : 'Charger mes heures 2025'}
         </button>
         {!connectionOk ? (
-          <p className="hint">La connexion MCP doit etre validee a l'etape 3.</p>
+          <p className="hint">Validez d'abord la connexion a l'etape 3.</p>
         ) : null}
       </section>
     );
@@ -233,7 +230,7 @@ export default function App() {
         <p className="badge">Jira Worklog CSE</p>
         <h1>Assistant de configuration simple</h1>
         <p className="hero-sub">
-          Un parcours clair, etape par etape, pour connecter Jira puis afficher vos heures 2025.
+          Un parcours clair, etape par etape, pour connecter Jira puis afficher vos heures de 2025.
         </p>
         <p className="status">{headerStatus}</p>
       </header>
@@ -276,13 +273,13 @@ export default function App() {
         </section>
 
         <section className="glass feedback-card reveal">
-          <h3>Feedback en direct</h3>
+          <h3>Messages de progression</h3>
           {error ? <p className="error-line">{error}</p> : null}
           <ul className="log-list">
             {(logs || []).map((line, index) => (
               <li key={`${line}-${index}`}>{line}</li>
             ))}
-            {!logs.length ? <li>Les retours techniques apparaitront ici.</li> : null}
+            {!logs.length ? <li>Les messages d'avancement apparaitront ici.</li> : null}
           </ul>
         </section>
 
@@ -324,7 +321,7 @@ export default function App() {
         </section>
 
         <section className="glass feedback-card reveal">
-          <h3>Details OSFO / ROEMO (sous-taches)</h3>
+          <h3>Detail des sous-taches pour OSFO et ROEMO</h3>
           {!report?.detailedProjects?.length ? (
             <p>Pas de detail disponible pour le moment.</p>
           ) : (

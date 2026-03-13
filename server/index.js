@@ -226,7 +226,7 @@ async function runMcpHandshake(token) {
       cleanup({
         ok: false,
         initSeconds: null,
-        message: 'Timeout handshake MCP',
+        message: 'La verification de la connexion a pris trop de temps',
         stderr: stderr.slice(-1000),
       });
     }, 25000);
@@ -264,7 +264,7 @@ async function runMcpHandshake(token) {
         cleanup({
           ok: initOk,
           initSeconds,
-          message: `Tools visibles: ${toolCount}`,
+          message: `Fonctions disponibles: ${toolCount}`,
           stderr: stderr.slice(-1000),
         });
       }
@@ -505,33 +505,33 @@ app.post('/api/mcp/setup', async (req, res) => {
   try {
     const token = String(req.body?.token || '').trim();
     if (!token) {
-      res.status(400).json({ error: 'Token PAT requis.' });
+      res.status(400).json({ error: "La cle d'acces Jira est requise." });
       return;
     }
 
-    logs.push('Demarrage setup MCP...');
-    logs.push('Tentative setup via codex exec...');
+    logs.push('Demarrage de la configuration automatique...');
+    logs.push('Tentative 1: configuration automatique.');
 
     const codexResult = await setupViaCodexExec(token);
     const codexOk = codexResult.code === 0;
 
     if (codexOk) {
-      logs.push('codex exec: OK');
+      logs.push('Tentative 1: reussie.');
     } else {
-      logs.push('codex exec: KO, bascule patch local.');
+      logs.push('Tentative 1: echec. Tentative 2 en cours.');
       const tail = (codexResult.stderr || codexResult.stdout || '').trim().split('\n').slice(-2).join(' | ');
-      if (tail) logs.push(`Detail: ${tail.slice(0, 180)}`);
+      if (tail) logs.push(`Detail technique: ${tail.slice(0, 180)}`);
       await setupViaLocalPatch(token);
-      logs.push('Patch local config: OK');
+      logs.push('Tentative 2: configuration locale appliquee.');
     }
 
     const handshake = await runMcpHandshake(token);
-    logs.push(handshake.ok ? 'Handshake MCP: OK' : 'Handshake MCP: KO');
+    logs.push(handshake.ok ? 'Verification de connexion: reussie.' : 'Verification de connexion: echec.');
     if (handshake.message) logs.push(handshake.message);
 
     res.json({ ok: handshake.ok, logs, handshake });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erreur setup', logs });
+    res.status(500).json({ error: err.message || 'Erreur pendant la configuration', logs });
   }
 });
 
@@ -540,18 +540,18 @@ app.post('/api/mcp/check', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
-      res.status(400).json({ error: 'Aucun token trouve (input ou config).', logs });
+      res.status(400).json({ error: "Aucune cle d'acces trouvee.", logs });
       return;
     }
 
-    logs.push('Verification handshake MCP...');
+    logs.push('Verification de la connexion en cours...');
     const handshake = await runMcpHandshake(token);
-    logs.push(handshake.ok ? 'Handshake MCP: OK' : 'Handshake MCP: KO');
+    logs.push(handshake.ok ? 'Verification de connexion: reussie.' : 'Verification de connexion: echec.');
     if (handshake.message) logs.push(handshake.message);
 
     res.json({ ok: handshake.ok, logs, handshake });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erreur check', logs });
+    res.status(500).json({ error: err.message || 'Erreur pendant la verification', logs });
   }
 });
 
@@ -559,14 +559,14 @@ app.post('/api/jira/report', async (req, res) => {
   try {
     const token = await getTokenFromRequestOrConfig(req.body?.token);
     if (!token) {
-      res.status(400).json({ error: 'Aucun token trouve (input ou config).' });
+      res.status(400).json({ error: "Aucune cle d'acces trouvee." });
       return;
     }
 
     const report = await collectWorkedHours2025(token, req.body?.detailedProjectKeys);
     res.json(report);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erreur rapport Jira 2025' });
+    res.status(500).json({ error: err.message || 'Erreur lors du chargement des heures 2025' });
   }
 });
 

@@ -4,8 +4,8 @@ Assistant local (React + Node.js) pour les utilisateurs non techniques.
 
 Objectif:
 
-- vous guider pas a pas pour creer un PAT Jira,
-- configurer Codex + MCP automatiquement,
+- vous guider pas a pas pour creer un token d'acces personnel Jira,
+- configurer Codex + la connexion Jira automatiquement,
 - verifier la connexion,
 - afficher les heures travaillees en 2025 par projet Jira, avec total final,
 - afficher le detail des sous-taches pour OSFO et ROEMO.
@@ -16,7 +16,7 @@ Le parcours est organise en 4 etapes claires:
 
 1. Creer le PAT Jira
 2. Lire le guide Codex
-3. Configurer et verifier la connexion MCP
+3. Configurer et verifier la connexion
 4. Charger le rapport des heures 2025
 
 L'application affiche des etats de chargement explicites et du feedback en direct.
@@ -55,7 +55,7 @@ Pendant l'etape de configuration, l'app tente:
 
 1. `codex exec` pour mettre a jour `~/.codex/config.toml`
 2. fallback local automatique si necessaire
-3. handshake MCP (initialize + tools/list) pour confirmer la connexion
+3. verification automatique de la connexion pour confirmer que tout fonctionne
 
 ## Open Source
 
