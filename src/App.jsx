@@ -4,6 +4,7 @@ const PAT_URL =
   'https://dev.osf.digital/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens';
 const CODEX_GUIDE_URL =
   'https://id.atlassian.com/login/select-account?application=confluence&continue=https%3A%2F%2Fosfdigital.atlassian.net%2Fwiki%2Fspaces%2FIAAP%2Fpages%2F6043435230%2FAllAi%2BCodex%2BUser%2BGuide%3Fmkt_tok%3DNDg0LU1YTy0zOTkAAAGefh8Jrty25p-c38C-t4pwUdS261E6ns3cANvUTrp4QEph9O6kERleTJKLyMs4JWc-EJqlqkBAQTpmQNUOxM3I3NE-k0E_OrUim1IsiSjQSXBC&login_hint=not%3Aaurelien.lewin%40osf.digital&redirectCount=1';
+const DETAILED_PROJECT_KEYS = ['OSFO', 'ROEMO'];
 
 const STEPS = [
   { id: 'pat', title: 'Creer votre PAT Jira' },
@@ -109,6 +110,7 @@ export default function App() {
     try {
       const data = await postJson('/api/jira/report', {
         token: token.trim() || undefined,
+        detailedProjectKeys: DETAILED_PROJECT_KEYS,
       });
       setReport(data);
     } catch (err) {
@@ -206,7 +208,7 @@ export default function App() {
         <h2>Etape 4: afficher vos heures 2025</h2>
         <p>
           Cette action calcule vos heures de travail 2025 par projet Jira,
-          puis affiche le total global.
+          puis affiche le total global et le detail des sous-taches pour OSFO et ROEMO.
         </p>
         <button
           type="button"
@@ -318,6 +320,54 @@ export default function App() {
                 </tbody>
               </table>
             </>
+          )}
+        </section>
+
+        <section className="glass feedback-card reveal">
+          <h3>Details OSFO / ROEMO (sous-taches)</h3>
+          {!report?.detailedProjects?.length ? (
+            <p>Pas de detail disponible pour le moment.</p>
+          ) : (
+            <div className="detail-grid">
+              {report.detailedProjects.map((detail) => (
+                <article className="detail-block" key={detail.projectKey}>
+                  <h4>
+                    {detail.projectKey} - {detail.projectName}
+                  </h4>
+                  <p className="hint">
+                    Sous-taches: {detail.subtaskCount} | Total sous-taches: {hours(detail.subtaskHours)} h
+                  </p>
+                  {!detail.subtasks?.length ? (
+                    <p>Aucune sous-tache avec heures sur 2025.</p>
+                  ) : (
+                    <table className="neon-table">
+                      <thead>
+                        <tr>
+                          <th>Sous-tache</th>
+                          <th>Parent</th>
+                          <th>Heures</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.subtasks.map((subtask) => (
+                          <tr key={subtask.issueKey}>
+                            <td>
+                              <strong>{subtask.issueKey}</strong>
+                              <br />
+                              <span>{subtask.summary}</span>
+                            </td>
+                            <td>
+                              {subtask.parentKey ? `${subtask.parentKey} - ${subtask.parentSummary}` : '-'}
+                            </td>
+                            <td>{hours(subtask.hours)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </article>
+              ))}
+            </div>
           )}
         </section>
       </main>

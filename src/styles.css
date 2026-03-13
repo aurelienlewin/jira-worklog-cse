@@ -284,6 +284,22 @@ label {
   margin-bottom: 10px;
 }
 
+.detail-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-block {
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.detail-block h4 {
+  margin: 0 0 6px;
+}
+
 .neon-table {
   width: 100%;
   border-collapse: collapse;

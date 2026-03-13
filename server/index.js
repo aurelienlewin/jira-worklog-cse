@@ -11,6 +11,7 @@ const API_PORT = Number(process.env.API_PORT || 8787);
 const JIRA_URL = 'https://dev.osf.digital';
 const WORKLOG_START = new Date('2025-01-01T00:00:00.000Z');
 const WORKLOG_END = new Date('2025-12-31T23:59:59.999Z');
+const DEFAULT_DETAILED_PROJECT_KEYS = ['OSFO', 'ROEMO'];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const MCP_SECTION = 'mcp-atlassian-dev-osf';
 
@@ -344,8 +345,16 @@ async function mapLimit(items, limit, worker) {
   return results;
 }
 
-async function collectWorkedHours2025(token) {
+function normalizeProjectKeys(inputKeys) {
+  if (!Array.isArray(inputKeys) || !inputKeys.length) {
+    return [...DEFAULT_DETAILED_PROJECT_KEYS];
+  }
+  return [...new Set(inputKeys.map((v) => String(v || '').trim().toUpperCase()).filter(Boolean))];
+}
+
+async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAILED_PROJECT_KEYS) {
   const me = await jiraFetchJson(token, '/rest/api/2/myself');
+  const detailedSet = new Set(normalizeProjectKeys(detailedProjectKeys));
 
   const allIssues = [];
   let startAt = 0;
@@ -355,7 +364,7 @@ async function collectWorkedHours2025(token) {
   while (true) {
     const page = await jiraFetchJson(
       token,
-      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=project,key`
+      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${maxResults}&fields=project,key,summary,issuetype,parent`
     );
 
     const issues = page.issues || [];
@@ -366,12 +375,18 @@ async function collectWorkedHours2025(token) {
   }
 
   const byProject = new Map();
+  const detailedByProject = new Map();
   let keptWorklogs = 0;
 
   await mapLimit(allIssues, 8, async (issue) => {
     const issueKey = issue.key;
     const projectKey = issue.fields?.project?.key || 'UNKNOWN';
     const projectName = issue.fields?.project?.name || 'Projet inconnu';
+    const issueSummary = issue.fields?.summary || 'Sans titre';
+    const issueTypeName = issue.fields?.issuetype?.name || 'Issue';
+    const isSubtask = Boolean(issue.fields?.issuetype?.subtask || issue.fields?.parent?.key);
+    const parentKey = issue.fields?.parent?.key || null;
+    const parentSummary = issue.fields?.parent?.fields?.summary || 'Parent';
 
     let wlStart = 0;
     const wlMax = 1000;
@@ -397,6 +412,27 @@ async function collectWorkedHours2025(token) {
         };
         current.seconds += seconds;
         byProject.set(projectKey, current);
+
+        if (detailedSet.has(projectKey)) {
+          const projectDetail = detailedByProject.get(projectKey) || {
+            projectKey,
+            projectName,
+            issues: new Map(),
+          };
+
+          const issueDetail = projectDetail.issues.get(issueKey) || {
+            issueKey,
+            issueSummary,
+            issueTypeName,
+            isSubtask,
+            parentKey,
+            parentSummary,
+            seconds: 0,
+          };
+          issueDetail.seconds += seconds;
+          projectDetail.issues.set(issueKey, issueDetail);
+          detailedByProject.set(projectKey, projectDetail);
+        }
       }
 
       wlStart += worklogs.length;
@@ -414,9 +450,46 @@ async function collectWorkedHours2025(token) {
     .sort((a, b) => b.seconds - a.seconds);
 
   const totalSeconds = projects.reduce((sum, p) => sum + p.seconds, 0);
+  const detailedProjects = [...detailedByProject.values()]
+    .map((project) => {
+      const allDetailedIssues = [...project.issues.values()].sort((a, b) => b.seconds - a.seconds);
+      const subtasks = allDetailedIssues
+        .filter((issue) => issue.isSubtask && issue.seconds > 0)
+        .map((issue) => ({
+          issueKey: issue.issueKey,
+          summary: issue.issueSummary,
+          parentKey: issue.parentKey,
+          parentSummary: issue.parentSummary,
+          issueType: issue.issueTypeName,
+          seconds: issue.seconds,
+          hours: Number((issue.seconds / 3600).toFixed(2)),
+        }));
+      const subtaskSeconds = subtasks.reduce((sum, issue) => sum + issue.seconds, 0);
+      return {
+        projectKey: project.projectKey,
+        projectName: project.projectName,
+        subtaskCount: subtasks.length,
+        subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
+        subtasks,
+      };
+    })
+    .sort((a, b) => a.projectKey.localeCompare(b.projectKey));
+  for (const projectKey of detailedSet) {
+    if (detailedProjects.some((project) => project.projectKey === projectKey)) continue;
+    const foundProject = projects.find((project) => project.projectKey === projectKey);
+    detailedProjects.push({
+      projectKey,
+      projectName: foundProject?.projectName || projectKey,
+      subtaskCount: 0,
+      subtaskHours: 0,
+      subtasks: [],
+    });
+  }
+  detailedProjects.sort((a, b) => a.projectKey.localeCompare(b.projectKey));
 
   return {
     projects,
+    detailedProjects,
     totalHours: Number((totalSeconds / 3600).toFixed(2)),
     issueCount: allIssues.length,
     worklogCount: keptWorklogs,
@@ -490,7 +563,7 @@ app.post('/api/jira/report', async (req, res) => {
       return;
     }
 
-    const report = await collectWorkedHours2025(token);
+    const report = await collectWorkedHours2025(token, req.body?.detailedProjectKeys);
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erreur rapport Jira 2025' });
