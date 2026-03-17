@@ -92,15 +92,35 @@ function writeStoredValue(key, rawValue) {
   }
 }
 
-function readSessionJson(key) {
-  if (typeof window === 'undefined') return null;
+function parseStoredJson(raw) {
+  if (!raw) return null;
   try {
-    const raw = window.sessionStorage.getItem(key);
-    if (!raw) return null;
     return JSON.parse(raw);
   } catch {
     return null;
   }
+}
+
+function readSessionJson(key) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return parseStoredJson(raw);
+  } catch {
+    return null;
+  }
+}
+
+function readPersistentJson(key) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const localRaw = window.localStorage.getItem(key);
+    const localParsed = parseStoredJson(localRaw);
+    if (localParsed !== null) return localParsed;
+  } catch {
+    // Ignore storage access errors.
+  }
+  return readSessionJson(key);
 }
 
 function writeSessionJson(key, value) {
@@ -116,11 +136,37 @@ function writeSessionJson(key, value) {
   }
 }
 
+function writePersistentJson(key, value) {
+  if (typeof window === 'undefined') return;
+  let serialized = null;
+  if (value !== undefined && value !== null) {
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      return;
+    }
+  }
+
+  try {
+    if (serialized === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, serialized);
+  } catch {
+    // Ignore storage access errors.
+  }
+
+  try {
+    if (serialized === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, serialized);
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
 function clearSessionDataCache() {
   writeSessionJson(SESSION_CONNECTION_KEY, null);
-  writeSessionJson(SESSION_REPORT_KEY, null);
-  writeSessionJson(SESSION_LEAVES_KEY, null);
-  writeSessionJson(SESSION_DATA_CONTEXT_KEY, null);
+  writePersistentJson(SESSION_REPORT_KEY, null);
+  writePersistentJson(SESSION_LEAVES_KEY, null);
+  writePersistentJson(SESSION_DATA_CONTEXT_KEY, null);
 }
 
 function hashString(value) {
@@ -868,13 +914,13 @@ export default function App() {
       setLeaves(leavesData);
       const contextKey = buildDataContextKey(activeToken, activeUserEmail);
       dataContextRef.current = contextKey;
-      writeSessionJson(SESSION_DATA_CONTEXT_KEY, {
+      writePersistentJson(SESSION_DATA_CONTEXT_KEY, {
         version: SESSION_DATA_CACHE_VERSION,
         key: contextKey,
         savedAt: Date.now(),
       });
-      writeSessionJson(SESSION_REPORT_KEY, hoursData);
-      writeSessionJson(SESSION_LEAVES_KEY, leavesData);
+      writePersistentJson(SESSION_REPORT_KEY, hoursData);
+      writePersistentJson(SESSION_LEAVES_KEY, leavesData);
       setReportProgress({
         active: true,
         value: 100,
@@ -1040,7 +1086,7 @@ export default function App() {
           await loadYearlyData(activeToken, { userEmail: requestedUserEmail, signal: controller.signal });
         } else if (!options.skipDataLoad && !shouldLoadData) {
           setPostProgressFocusTarget('summary');
-          addToast('ℹ️ Données déjà disponibles dans la session. Rafraîchissez manuellement si besoin.', 'info');
+          addToast('ℹ️ Données déjà disponibles localement. Rafraîchissez manuellement si besoin.', 'info');
         } else {
           setPostProgressFocusTarget('summary');
         }
@@ -1089,15 +1135,15 @@ export default function App() {
       if (!savedToken) return;
 
       setToken(savedToken);
-      addToast("ℹ️ Clé d'accès retrouvée dans cette session.", 'info');
+      addToast("ℹ️ Clé d'accès retrouvée sur cet appareil.", 'info');
       const contextKey = buildDataContextKey(savedToken, savedUserEmail);
-      const cachedContext = readSessionJson(SESSION_DATA_CONTEXT_KEY);
+      const cachedContext = readPersistentJson(SESSION_DATA_CONTEXT_KEY);
       const contextMatches =
         cachedContext?.version === SESSION_DATA_CACHE_VERSION &&
         cachedContext?.key === contextKey;
       const cachedConnection = contextMatches ? readSessionJson(SESSION_CONNECTION_KEY) : null;
-      const cachedReport = contextMatches ? readSessionJson(SESSION_REPORT_KEY) : null;
-      const cachedLeaves = contextMatches ? readSessionJson(SESSION_LEAVES_KEY) : null;
+      const cachedReport = contextMatches ? readPersistentJson(SESSION_REPORT_KEY) : null;
+      const cachedLeaves = contextMatches ? readPersistentJson(SESSION_LEAVES_KEY) : null;
 
       if (contextMatches) {
         dataContextRef.current = contextKey;
@@ -1111,7 +1157,7 @@ export default function App() {
         setReport(cachedReport);
         setLeaves(cachedLeaves);
         goToStep(3, { force: true });
-        addToast('ℹ️ Données restaurées depuis la session (pas de nouvelle collecte).', 'info');
+        addToast('ℹ️ Données restaurées localement (pas de nouvelle collecte).', 'info');
         return;
       }
 
