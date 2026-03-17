@@ -560,24 +560,81 @@ function inDateRange(dateValue) {
   return dt >= WORKLOG_START && dt <= WORKLOG_END;
 }
 
+function collectNormalizedIdentities(user) {
+  if (!user || typeof user !== 'object') return [];
+  const rawValues = [
+    user.name,
+    user.key,
+    user.emailAddress,
+    user.accountId,
+    user.displayName,
+    user.self,
+  ];
+  const seen = new Set();
+  const values = [];
+
+  for (const raw of rawValues) {
+    const normalized = String(raw || '').trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    values.push(normalized);
+  }
+
+  return values;
+}
+
+class IdentityMatcher {
+  constructor(user) {
+    this.identities = new Set(collectNormalizedIdentities(user));
+  }
+
+  matches(user) {
+    if (!user || !this.identities.size) return false;
+    const candidates = collectNormalizedIdentities(user);
+    for (const candidate of candidates) {
+      if (this.identities.has(candidate)) return true;
+    }
+    return false;
+  }
+}
+
+class IssueMetricsAccumulator {
+  constructor() {
+    this.totalSeconds = 0;
+    this.subtaskSeconds = 0;
+    this.subtasks = [];
+    this.issueTypeSeconds = new Map();
+  }
+
+  add(issue) {
+    const seconds = Number(issue?.seconds || 0);
+    if (!seconds) return;
+
+    this.totalSeconds += seconds;
+    const issueType = String(issue?.issueType || 'Issue');
+    this.issueTypeSeconds.set(issueType, (this.issueTypeSeconds.get(issueType) || 0) + seconds);
+
+    if (issue?.isSubtask) {
+      this.subtasks.push(issue);
+      this.subtaskSeconds += seconds;
+    }
+  }
+
+  toIssueTypeTotals() {
+    return [...this.issueTypeSeconds.entries()]
+      .map(([issueType, seconds]) => ({
+        issueType,
+        hours: Number((seconds / 3600).toFixed(2)),
+      }))
+      .sort((a, b) => b.hours - a.hours);
+  }
+}
+
 function sameUser(author, me) {
   if (!author || !me) return false;
-
-  const left = new Set(
-    [author.name, author.key, author.emailAddress, author.accountId, author.displayName, author.self]
-      .filter(Boolean)
-      .map((v) => String(v).trim().toLowerCase())
-  );
-  const right = new Set(
-    [me.name, me.key, me.emailAddress, me.accountId, me.displayName, me.self]
-      .filter(Boolean)
-      .map((v) => String(v).trim().toLowerCase())
-  );
-
-  for (const v of left) {
-    if (right.has(v)) return true;
-  }
-  return false;
+  if (me instanceof IdentityMatcher) return me.matches(author);
+  if (author instanceof IdentityMatcher) return author.matches(me);
+  return new IdentityMatcher(me).matches(author);
 }
 
 async function mapLimit(items, limit, worker) {
@@ -1044,8 +1101,8 @@ function makeLeaveUserMatchers(userContext) {
   return candidates.filter(Boolean);
 }
 
-function isWorklogForLeaveTarget(worklog, userContext, matchTokens) {
-  if (sameUser(worklog?.author, userContext?.targetUser)) return true;
+function isWorklogForLeaveTarget(worklog, userContext, matchTokens, targetMatcher = null) {
+  if (sameUser(worklog?.author, targetMatcher || userContext?.targetMatcher || userContext?.targetUser)) return true;
   const leaveUserName = extractLeaveTargetFromComment(worklog?.comment);
   if (!leaveUserName) return false;
   const normalized = normalizeTextForMatch(leaveUserName);
@@ -1146,12 +1203,15 @@ function buildAuthorScopes(targetUser, me) {
 
 async function resolveTargetUser(token, requestedEmail) {
   const me = await fetchCurrentUser(token);
+  const meMatcher = new IdentityMatcher(me);
   const email = String(requestedEmail || '').trim();
 
   if (!email) {
     return {
       me,
       targetUser: me,
+      meMatcher,
+      targetMatcher: meMatcher,
       authorScopes: ['worklogAuthor = currentUser()'],
       notes: [],
       mode: 'current',
@@ -1198,6 +1258,8 @@ async function resolveTargetUser(token, requestedEmail) {
   return {
     me,
     targetUser,
+    meMatcher,
+    targetMatcher: new IdentityMatcher(targetUser),
     authorScopes,
     notes,
     mode,
@@ -1214,6 +1276,7 @@ function normalizeProjectKeys(inputKeys) {
 
 async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAILED_PROJECT_KEYS, requestedEmail = '') {
   const userContext = await resolveTargetUser(token, requestedEmail);
+  const targetMatcher = userContext.targetMatcher || new IdentityMatcher(userContext.targetUser);
   const detailedSet = new Set(normalizeProjectKeys(detailedProjectKeys));
   const issueByKey = new Map();
   const discoveryLogs = [...userContext.notes];
@@ -1261,7 +1324,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
 
       for (const wl of worklogs) {
         if (!inDateRange(wl.started)) continue;
-        if (!sameUser(wl.author, userContext.targetUser)) continue;
+        if (!sameUser(wl.author, targetMatcher)) continue;
 
         keptWorklogs += 1;
         const seconds = Number(wl.timeSpentSeconds || 0);
@@ -1325,9 +1388,12 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
   const detailedProjects = [...detailedByProject.values()]
     .map((project) => {
       const allDetailedIssues = [...project.issues.values()].sort((a, b) => b.seconds - a.seconds);
-      const issues = allDetailedIssues
-        .filter((issue) => issue.seconds > 0)
-        .map((issue) => ({
+      const issues = [];
+      const issueMetrics = new IssueMetricsAccumulator();
+
+      for (const issue of allDetailedIssues) {
+        if (issue.seconds <= 0) continue;
+        const normalizedIssue = {
           issueKey: issue.issueKey,
           summary: issue.issueSummary,
           parentKey: issue.parentKey,
@@ -1336,21 +1402,11 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
           isSubtask: issue.isSubtask,
           seconds: issue.seconds,
           hours: Number((issue.seconds / 3600).toFixed(2)),
-        }));
-      const issueSeconds = issues.reduce((sum, issue) => sum + issue.seconds, 0);
-      const subtasks = issues.filter((issue) => issue.isSubtask);
-      const subtaskSeconds = subtasks.reduce((sum, issue) => sum + issue.seconds, 0);
-      const issueTypeTotalsMap = new Map();
-      for (const issue of issues) {
-        const current = issueTypeTotalsMap.get(issue.issueType) || 0;
-        issueTypeTotalsMap.set(issue.issueType, current + issue.seconds);
+        };
+        issues.push(normalizedIssue);
+        issueMetrics.add(normalizedIssue);
       }
-      const issueTypeTotals = [...issueTypeTotalsMap.entries()]
-        .map(([issueType, seconds]) => ({
-          issueType,
-          hours: Number((seconds / 3600).toFixed(2)),
-        }))
-        .sort((a, b) => b.hours - a.hours);
+      const issueTypeTotals = issueMetrics.toIssueTypeTotals();
       const commentEntries = [...(project.commentEntries || [])]
         .sort((a, b) => {
           const left = new Date(a.started || 0).getTime();
@@ -1362,25 +1418,28 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
         projectKey: project.projectKey,
         projectName: project.projectName,
         issueCount: issues.length,
-        issueHours: Number((issueSeconds / 3600).toFixed(2)),
+        issueHours: Number((issueMetrics.totalSeconds / 3600).toFixed(2)),
         issueTypeTotals,
-        subtaskCount: subtasks.length,
-        subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
+        subtaskCount: issueMetrics.subtasks.length,
+        subtaskHours: Number((issueMetrics.subtaskSeconds / 3600).toFixed(2)),
         issues,
-        subtasks,
+        subtasks: issueMetrics.subtasks,
         commentCount: commentSummary.commentedWorklogs,
         commentHours: commentSummary.commentedHours,
         commentSummary,
         _commentEntries: commentEntries,
       };
-    })
-    .sort((a, b) => a.projectKey.localeCompare(b.projectKey));
+    });
+
+  const projectNameByKey = new Map(projects.map((project) => [project.projectKey, project.projectName]));
+  const existingDetailedKeys = new Set(detailedProjects.map((project) => project.projectKey));
+
   for (const projectKey of detailedSet) {
-    if (detailedProjects.some((project) => project.projectKey === projectKey)) continue;
-    const foundProject = projects.find((project) => project.projectKey === projectKey);
+    if (existingDetailedKeys.has(projectKey)) continue;
+    const foundProjectName = projectNameByKey.get(projectKey);
     detailedProjects.push({
       projectKey,
-      projectName: foundProject?.projectName || projectKey,
+      projectName: foundProjectName || projectKey,
       issueCount: 0,
       issueHours: 0,
       issueTypeTotals: [],
@@ -1400,6 +1459,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
       },
       _commentEntries: [],
     });
+    existingDetailedKeys.add(projectKey);
   }
   detailedProjects.sort((a, b) => a.projectKey.localeCompare(b.projectKey));
 
@@ -1453,6 +1513,7 @@ async function collectWorkedHours2025(token, detailedProjectKeys = DEFAULT_DETAI
 
 async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_KEY, requestedEmail = '') {
   const userContext = await resolveTargetUser(token, requestedEmail);
+  const targetMatcher = userContext.targetMatcher || new IdentityMatcher(userContext.targetUser);
   const normalizedRootKey = String(rootIssueKey || LEAVE_ANCHOR_ISSUE_KEY).trim().toUpperCase();
   const leavesProjectKey = normalizedRootKey.includes('-') ? normalizedRootKey.split('-')[0] : normalizedRootKey;
   const fields = 'key,summary,status,issuetype,parent';
@@ -1515,7 +1576,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
 
       for (const wl of worklogs) {
         if (!inDateRange(wl.started)) continue;
-        if (!isWorklogForLeaveTarget(wl, userContext, leaveUserTokens)) continue;
+        if (!isWorklogForLeaveTarget(wl, userContext, leaveUserTokens, targetMatcher)) continue;
         const seconds = Number(wl.timeSpentSeconds || 0);
         if (!seconds) continue;
         keptWorklogs += 1;
@@ -1544,19 +1605,12 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
   }
 
   issues.sort((a, b) => b.seconds - a.seconds);
-  const issueTypeTotalsMap = new Map();
+  const issueMetrics = new IssueMetricsAccumulator();
   for (const issue of issues) {
-    const current = issueTypeTotalsMap.get(issue.issueType) || 0;
-    issueTypeTotalsMap.set(issue.issueType, current + issue.seconds);
+    issueMetrics.add(issue);
   }
-  const issueTypeTotals = [...issueTypeTotalsMap.entries()]
-    .map(([issueType, seconds]) => ({
-      issueType,
-      hours: Number((seconds / 3600).toFixed(2)),
-    }))
-    .sort((a, b) => b.hours - a.hours);
-  const subtasks = issues.filter((issue) => issue.isSubtask);
-  const subtaskSeconds = subtasks.reduce((sum, issue) => sum + issue.seconds, 0);
+  const issueTypeTotals = issueMetrics.toIssueTypeTotals();
+  const subtasks = issueMetrics.subtasks;
 
   const totalHours = Number((totalSeconds / 3600).toFixed(2));
   const totalDays = Number((totalHours / WORKING_DAY_HOURS).toFixed(2));
@@ -1582,7 +1636,7 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
     totalDays,
     issueTypeTotals,
     subtaskCount: subtasks.length,
-    subtaskHours: Number((subtaskSeconds / 3600).toFixed(2)),
+    subtaskHours: Number((issueMetrics.subtaskSeconds / 3600).toFixed(2)),
     discovery: {
       projectKey: leavesProjectKey,
       usedFallbackScope,

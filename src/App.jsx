@@ -422,11 +422,30 @@ export default function App() {
     return '🌿 Suivez les étapes tranquillement';
   }, [busyAction, connection, connectionOk, isBusy]);
 
+  const reportIndexes = useMemo(() => {
+    const projectByKey = new Map();
+    const detailedByKey = new Map();
+
+    for (const project of report?.projects || []) {
+      const key = String(project?.projectKey || '').trim().toUpperCase();
+      if (!key || projectByKey.has(key)) continue;
+      projectByKey.set(key, project);
+    }
+
+    for (const project of report?.detailedProjects || []) {
+      const key = String(project?.projectKey || '').trim().toUpperCase();
+      if (!key || detailedByKey.has(key)) continue;
+      detailedByKey.set(key, project);
+    }
+
+    return { projectByKey, detailedByKey };
+  }, [report]);
+
   const summary = useMemo(() => {
     const workedHours = Number(report?.totalHours || 0);
     const leavesHours = Number(leaves?.totalHours || 0);
     const leavesDays = Number(leaves?.totalDays || 0);
-    const benchProject = report?.projects?.find((project) => project.projectKey === BENCH_SCOPE_KEY);
+    const benchProject = reportIndexes.projectByKey.get(BENCH_SCOPE_KEY) || null;
     const benchHours = Number(benchProject?.hours || 0);
     const benchRate = workedHours > 0 ? (benchHours / workedHours) * 100 : 0;
     const utilizationRate = Math.max(0, 100 - benchRate);
@@ -438,27 +457,29 @@ export default function App() {
       benchRate,
       utilizationRate,
     };
-  }, [report, leaves]);
+  }, [report, leaves, reportIndexes]);
 
   const hasBenchHours = Number(summary.benchHours || 0) > 0;
   const hasLeavesHours = Number(summary.leavesHours || 0) > 0;
 
   const benchDetails = useMemo(() => {
-    return report?.detailedProjects?.find((project) => project.projectKey === BENCH_SCOPE_KEY) || null;
-  }, [report]);
+    return reportIndexes.detailedByKey.get(BENCH_SCOPE_KEY) || null;
+  }, [reportIndexes]);
 
   const roemoDetails = useMemo(() => {
-    return report?.detailedProjects?.find((project) => project.projectKey === ROEMO_SCOPE_KEY) || null;
-  }, [report]);
+    return reportIndexes.detailedByKey.get(ROEMO_SCOPE_KEY) || null;
+  }, [reportIndexes]);
   const hasRoemoHours = Number(roemoDetails?.issueHours || 0) > 0;
 
   const leavesDetails = useMemo(() => {
     const issues = leaves?.issues || [];
     const subtasks = [];
+    let computedSubtaskSeconds = 0;
 
     for (const issue of issues) {
       if (issue.isSubtask || issue.parentKey) {
         subtasks.push(issue);
+        computedSubtaskSeconds += Number(issue.seconds || 0);
       }
     }
 
@@ -467,9 +488,8 @@ export default function App() {
         ? leaves.issueTypeTotals
         : [];
 
-    const subtaskSeconds = subtasks.reduce((sum, issue) => sum + Number(issue.seconds || 0), 0);
     const subtaskCount = Number(leaves?.subtaskCount ?? subtasks.length);
-    const subtaskHours = Number(leaves?.subtaskHours ?? Number((subtaskSeconds / 3600).toFixed(2)));
+    const subtaskHours = Number(leaves?.subtaskHours ?? Number((computedSubtaskSeconds / 3600).toFixed(2)));
 
     return {
       issueTypeTotals,
