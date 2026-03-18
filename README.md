@@ -130,6 +130,31 @@ npm start -- --headless --pdf -o ./out -u user@domain.com -t <votre_token>
 npm start -- --headless
 ```
 
+### Mode verbeux (diagnostic headless)
+
+Pour observer le détail des événements d'exécution (utile en cas de latence avant la fin du process):
+
+```bash
+RUST_LOG=info codex exec \
+  --json \
+  --progress-cursor \
+  -c 'model_reasoning_summary="detailed"' \
+  "Votre prompt" 2>codex-debug.log | tee codex-events.jsonl
+```
+
+Notes:
+
+- `--json` affiche le flux d'événements (progression, erreurs, fin de tour).
+- `model_reasoning_summary="detailed"` active un résumé de raisonnement quand le provider le supporte.
+- si la sortie tarde à cause de tentatives de reconnexion, réduisez les retries:
+
+```bash
+codex exec \
+  -c 'model_providers.osfdigital.stream_max_retries=0' \
+  --json \
+  "Votre prompt"
+```
+
 ## Scripts utiles
 
 - `npm run dev`: API + frontend

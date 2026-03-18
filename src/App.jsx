@@ -1581,7 +1581,7 @@ export default function App() {
       }));
       addWorksheet('Bench_Commentaires_Exemples', benchCommentHighlightsRows);
 
-      if (HAS_DISTINCT_ROEMO_SCOPE) {
+      if (HAS_DISTINCT_ROEMO_SCOPE && hasRoemoHours) {
         const roemoTypeRows = (roemoDetails?.issueTypeTotals || []).map((entry) => ({
           Type: entry.issueType,
           Heures: Number(entry.hours || 0),
@@ -1812,6 +1812,11 @@ export default function App() {
       font-size: 12px;
       font-style: italic;
     }
+    .meta-note {
+      margin: 6px 0 0;
+      color: #5f7859;
+      font-size: 12px;
+    }
     .section-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -1832,7 +1837,7 @@ export default function App() {
         <span>Utilisateur: ${escapeHtml(analysedUser)}</span>
         <span>Date export: ${escapeHtml(generatedAt)}</span>
         <span>Scope bench: ${escapeHtml(BENCH_SCOPE_KEY)}</span>
-        ${HAS_DISTINCT_ROEMO_SCOPE ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
+        ${HAS_DISTINCT_ROEMO_SCOPE && hasRoemoHours ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
         <span>Scope congés: ${escapeHtml(LEAVE_SCOPE_LABEL)}</span>
       </div>
     </section>
@@ -1912,6 +1917,16 @@ export default function App() {
           )}
         </div>
         <div>
+          <h3>Résumé des commentaires bench</h3>
+          <p class="narrative">${escapeHtml(benchCommentSummary?.message || 'Résumé indisponible pour le moment.')}</p>
+          <p class="meta-note">
+            Source du résumé: ${escapeHtml(benchCommentSummary?.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local')}
+          </p>
+          <p class="meta-note">
+            Saisies commentées: ${escapeHtml(String(benchCommentSummary?.commentedWorklogs || 0))} - Temps couvert: ${escapeHtml(`${formatNumber(benchCommentSummary?.commentedHours || 0)} h`)}
+          </p>
+        </div>
+        <div>
           <h3>Commentaires bench - thèmes</h3>
           ${toRows(
             benchCommentSummary?.themes || [],
@@ -1930,7 +1945,7 @@ export default function App() {
       </div>
     </section>
 
-    ${HAS_DISTINCT_ROEMO_SCOPE ? `
+    ${HAS_DISTINCT_ROEMO_SCOPE && hasRoemoHours ? `
     <section class="panel">
       <h2>Détail projet (${escapeHtml(ROEMO_SCOPE_KEY)})</h2>
       <p class="narrative">${escapeHtml(roemoNarrative)}</p>
@@ -2663,7 +2678,7 @@ export default function App() {
               )}
             </section>
 
-            {HAS_DISTINCT_ROEMO_SCOPE ? (
+            {HAS_DISTINCT_ROEMO_SCOPE && (!isRoemoReady || hasRoemoHours) ? (
               <section className={`glass feedback-card reveal${isRoemoReady ? '' : ' section-pending'}`} aria-busy={!isRoemoReady}>
                 <h3>🧩 Détail projet ({ROEMO_SCOPE_KEY})</h3>
                 {!isRoemoReady ? (

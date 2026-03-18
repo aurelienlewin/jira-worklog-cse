@@ -1901,6 +1901,7 @@ function buildExportContext(report, leaves, requestedEmail) {
   const utilizationRate = Math.max(0, 100 - benchRate);
   const benchDetails = detailedByKey.get(BENCH_SCOPE_KEY) || null;
   const roemoDetails = detailedByKey.get(ROEMO_SCOPE_KEY) || null;
+  const showRoemoSection = HAS_DISTINCT_ROEMO_SCOPE && Number(roemoDetails?.issueHours || 0) > 0;
   const leavesDetails = buildLeavesDetailsForExport(leaves);
   const exportIdentity = buildExportIdentity(report, leaves, requestedEmail);
   const benchNarrative = buildNarrativeForProject(benchDetails, BENCH_SCOPE_KEY, 'bench');
@@ -1922,6 +1923,7 @@ function buildExportContext(report, leaves, requestedEmail) {
     summary,
     benchDetails,
     roemoDetails,
+    showRoemoSection,
     leavesDetails,
     analysisInfo,
     progressCircles,
@@ -1938,7 +1940,7 @@ async function writeHeadlessXlsx(filePath, context) {
     throw new Error("Le module d'export Excel n'a pas pu être chargé correctement.");
   }
 
-  const { report, leaves, summary, benchDetails, roemoDetails, leavesDetails } = context;
+  const { report, leaves, summary, benchDetails, roemoDetails, showRoemoSection, leavesDetails } = context;
   const benchCommentSummary = benchDetails?.commentSummary || null;
   const roemoCommentSummary = roemoDetails?.commentSummary || null;
   const workbook = new ExcelJS.Workbook();
@@ -2152,7 +2154,7 @@ async function writeHeadlessXlsx(filePath, context) {
     }))
   );
 
-  if (HAS_DISTINCT_ROEMO_SCOPE) {
+  if (showRoemoSection) {
     addWorksheet(
       projectSheetName(ROEMO_SCOPE_KEY, 'Types'),
       (roemoDetails?.issueTypeTotals || []).map((entry) => ({
@@ -2221,7 +2223,7 @@ function escapeHtml(value) {
 }
 
 function buildHeadlessPdfHtml(context, docTitle) {
-  const { report, leaves, summary, benchDetails, roemoDetails, leavesDetails, analysisInfo, progressCircles } = context;
+  const { report, leaves, summary, benchDetails, roemoDetails, showRoemoSection, leavesDetails, analysisInfo, progressCircles } = context;
   const benchCommentSummary = benchDetails?.commentSummary || null;
   const roemoCommentSummary = roemoDetails?.commentSummary || null;
   const generatedAt = new Date().toLocaleString('fr-FR');
@@ -2503,6 +2505,11 @@ function buildHeadlessPdfHtml(context, docTitle) {
       font-size: 12px;
       font-style: italic;
     }
+    .meta-note {
+      margin: 6px 0 0;
+      color: #5f7859;
+      font-size: 12px;
+    }
     .section-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -2523,7 +2530,7 @@ function buildHeadlessPdfHtml(context, docTitle) {
         <span>Utilisateur: ${escapeHtml(analysedUser)}</span>
         <span>Date export: ${escapeHtml(generatedAt)}</span>
         <span>Scope bench: ${escapeHtml(BENCH_SCOPE_KEY)}</span>
-        ${HAS_DISTINCT_ROEMO_SCOPE ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
+        ${showRoemoSection ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
         <span>Scope congés: ${escapeHtml(LEAVE_SCOPE_LABEL)}</span>
       </div>
     </section>
@@ -2616,6 +2623,16 @@ function buildHeadlessPdfHtml(context, docTitle) {
           )}
         </div>
         <div>
+          <h3>Résumé des commentaires bench</h3>
+          <p class="narrative">${escapeHtml(benchCommentSummary?.message || 'Résumé indisponible pour le moment.')}</p>
+          <p class="meta-note">
+            Source du résumé: ${escapeHtml(benchCommentSummary?.source === 'codex_exec' ? 'Codex (codex exec)' : 'Mode secours local')}
+          </p>
+          <p class="meta-note">
+            Saisies commentées: ${escapeHtml(String(benchCommentSummary?.commentedWorklogs || 0))} - Temps couvert: ${escapeHtml(`${formatNumberForExport(benchCommentSummary?.commentedHours || 0)} h`)}
+          </p>
+        </div>
+        <div>
           <h3>Commentaires bench - thèmes</h3>
           ${toRows(
             benchCommentSummary?.themes || [],
@@ -2634,7 +2651,7 @@ function buildHeadlessPdfHtml(context, docTitle) {
       </div>
     </section>
 
-    ${HAS_DISTINCT_ROEMO_SCOPE ? `
+    ${showRoemoSection ? `
     <section class="panel">
       <h2>Détail projet (${escapeHtml(ROEMO_SCOPE_KEY)})</h2>
       <p class="narrative">${escapeHtml(context.roemoNarrative)}</p>
@@ -2997,7 +3014,7 @@ async function startServer() {
 async function main() {
   if (CLI_LAUNCH_OPTIONS.headless) {
     await runHeadlessExports(CLI_LAUNCH_OPTIONS);
-    return;
+    process.exit(0);
   }
   await startServer();
 }
