@@ -137,8 +137,8 @@ Le mode verbose est désormais activé par défaut pour les résumés `codex exe
 - flux d'événements JSON (`--json`),
 - progression curseur (`--progress-cursor`),
 - résumé de raisonnement `model_reasoning_summary="detailed"`,
-- logs runtime via `RUST_LOG=info`,
-- affichage ligne par ligne dans la sortie headless avec préfixes `[codex:<scope>]`.
+- logs runtime via `RUST_LOG=warn`,
+- affichage digest filtré dans la sortie headless avec préfixes `[codex:<scope>]`.
 
 Si vous voulez reproduire manuellement le même comportement:
 
@@ -155,7 +155,9 @@ Notes:
 - `--json` affiche le flux d'événements (progression, erreurs, fin de tour).
 - `model_reasoning_summary="detailed"` active un résumé de raisonnement quand le provider le supporte.
 - pour désactiver le mode verbose par défaut dans l'app: `CODEX_SUMMARY_VERBOSE=false`.
-- pour ajuster le niveau de logs runtime: `CODEX_SUMMARY_RUST_LOG=debug` (ou `info`, `warn`, ...).
+- pour choisir le rendu logs: `CODEX_SUMMARY_LOG_STYLE=digest|raw` (défaut: `digest`).
+- pour activer/désactiver la mini UI CLI (spinner + statut): `CODEX_SUMMARY_CLI_UI=true|false`.
+- pour ajuster le niveau de logs runtime: `CODEX_SUMMARY_RUST_LOG=debug` (ou `info`, `warn`, ... ; défaut `warn`).
 - pour ajuster le niveau de résumé de raisonnement: `CODEX_SUMMARY_REASONING=concise|detailed|auto|none`.
 - si la sortie tarde à cause de tentatives de reconnexion, réduisez les retries:
 

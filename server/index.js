@@ -163,7 +163,9 @@ const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const MAX_COMMENT_SAMPLES_PER_PROJECT = Number(process.env.MAX_COMMENT_SAMPLES_PER_PROJECT || 120);
 const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 45000);
 const CODEX_SUMMARY_VERBOSE = String(process.env.CODEX_SUMMARY_VERBOSE || 'true').trim().toLowerCase() !== 'false';
-const CODEX_SUMMARY_RUST_LOG = String(process.env.CODEX_SUMMARY_RUST_LOG || 'info').trim() || 'info';
+const CODEX_SUMMARY_RUST_LOG = String(process.env.CODEX_SUMMARY_RUST_LOG || 'warn').trim() || 'warn';
+const CODEX_SUMMARY_LOG_STYLE = String(process.env.CODEX_SUMMARY_LOG_STYLE || 'digest').trim().toLowerCase();
+const CODEX_SUMMARY_CLI_UI = String(process.env.CODEX_SUMMARY_CLI_UI || 'true').trim().toLowerCase() !== 'false';
 const CODEX_SUMMARY_REASONING = (() => {
   const requested = String(process.env.CODEX_SUMMARY_REASONING || 'detailed').trim().toLowerCase();
   return ['auto', 'concise', 'detailed', 'none'].includes(requested) ? requested : 'detailed';
@@ -417,6 +419,178 @@ function parseJsonLine(line) {
   } catch {
     return null;
   }
+}
+
+function shortenForLog(text, max = 180) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}...` : normalized;
+}
+
+function createDigestConsoleLogger(prefix, options = {}) {
+  const uiEnabled = Boolean(options.uiEnabled && process.stdout.isTTY);
+  const spinnerFrames = ['|', '/', '-', '\\'];
+  let spinnerIndex = 0;
+  let spinnerTimer = null;
+  let currentStatus = 'initialisation...';
+  let isClosed = false;
+  let reconnects = 0;
+  let reconnectMax = 0;
+  let readonlyDbWarnings = 0;
+  let pathWarnings = 0;
+  let hadTurnFailed = false;
+  let hadTurnCompleted = false;
+
+  const renderStatus = () => {
+    if (!uiEnabled || isClosed) return;
+    readline.cursorTo(process.stdout, 0);
+    readline.clearLine(process.stdout, 0);
+    const frame = spinnerFrames[spinnerIndex % spinnerFrames.length];
+    spinnerIndex += 1;
+    process.stdout.write(`${prefix} ${frame} ${currentStatus}`);
+  };
+
+  const printLine = (line) => {
+    if (isClosed) return;
+    if (uiEnabled) {
+      readline.cursorTo(process.stdout, 0);
+      readline.clearLine(process.stdout, 0);
+    }
+    process.stdout.write(`${line}\n`);
+    if (uiEnabled && spinnerTimer) {
+      renderStatus();
+    }
+  };
+
+  const start = () => {
+    printLine(`${prefix} démarrage...`);
+    if (!uiEnabled) return;
+    spinnerTimer = setInterval(renderStatus, 120);
+    renderStatus();
+  };
+
+  const setStatus = (status) => {
+    currentStatus = status;
+    if (uiEnabled) {
+      renderStatus();
+    }
+  };
+
+  const handleStdoutLine = (line) => {
+    const trimmed = String(line || '').trim();
+    if (!trimmed) return;
+    const event = parseJsonLine(trimmed);
+    if (!event) {
+      if (options.rawMode) {
+        printLine(`${prefix} raw: ${trimmed}`);
+      }
+      return;
+    }
+
+    if (event.type === 'thread.started') {
+      const threadId = String(event.thread_id || '');
+      setStatus(`thread ${threadId ? threadId.slice(0, 8) : 'n/a'} initialise`);
+      return;
+    }
+
+    if (event.type === 'turn.started') {
+      setStatus('tour en cours');
+      return;
+    }
+
+    if (event.type === 'error') {
+      const message = String(event.message || '').trim();
+      const reconnectMatch = message.match(/Reconnecting\.\.\.\s*(\d+)\/(\d+)/i);
+      if (reconnectMatch) {
+        reconnects = Number(reconnectMatch[1] || reconnects);
+        reconnectMax = Number(reconnectMatch[2] || reconnectMax);
+        setStatus(`reconnexion ${reconnects}/${reconnectMax}`);
+        printLine(`${prefix} reconnexion ${reconnects}/${reconnectMax}`);
+        return;
+      }
+      printLine(`${prefix} erreur: ${shortenForLog(message)}`);
+      setStatus('erreur detectee');
+      return;
+    }
+
+    if (event.type === 'turn.failed') {
+      hadTurnFailed = true;
+      const message = String(event.error?.message || 'echec inconnu');
+      printLine(`${prefix} tour echoue: ${shortenForLog(message)}`);
+      setStatus('tour echoue');
+      return;
+    }
+
+    if (event.type === 'turn.completed') {
+      hadTurnCompleted = true;
+      printLine(`${prefix} tour termine`);
+      setStatus('tour termine');
+      return;
+    }
+
+    if (options.rawMode) {
+      printLine(`${prefix} event: ${trimmed}`);
+    }
+  };
+
+  const handleStderrLine = (line) => {
+    const trimmed = String(line || '').trim();
+    if (!trimmed) return;
+
+    if (/^WARNING: proceeding, even though we could not update PATH/.test(trimmed)) {
+      pathWarnings += 1;
+      return;
+    }
+    if (/codex_otel\.trace_safe|codex_otel\.log_only|feedback_tags:/.test(trimmed)) {
+      return;
+    }
+    if (/failed to read backfill state.*readonly database/.test(trimmed)) {
+      readonlyDbWarnings += 1;
+      if (readonlyDbWarnings === 1) {
+        printLine(`${prefix} diagnostic: avertissement sqlite read-only detecte (resume ensuite).`);
+      }
+      return;
+    }
+    if (/stream disconnected|panicked at|Could not create otel exporter/i.test(trimmed)) {
+      printLine(`${prefix} diagnostic: ${shortenForLog(trimmed)}`);
+      return;
+    }
+
+    if (options.rawMode) {
+      printLine(`${prefix} stderr: ${trimmed}`);
+    }
+  };
+
+  const finish = (result) => {
+    if (isClosed) return;
+    isClosed = true;
+    if (spinnerTimer) clearInterval(spinnerTimer);
+    if (uiEnabled) {
+      readline.cursorTo(process.stdout, 0);
+      readline.clearLine(process.stdout, 0);
+    }
+
+    const elapsedSeconds = Number((Number(result?.elapsedMs || 0) / 1000).toFixed(2));
+    const parts = [
+      `${prefix} fin`,
+      `code=${result?.code ?? 'n/a'}`,
+      `duree=${elapsedSeconds}s`,
+    ];
+    if (reconnectMax > 0) parts.push(`reconnexions=${reconnects}/${reconnectMax}`);
+    if (readonlyDbWarnings > 0) parts.push(`sqlite_readonly_warn=${readonlyDbWarnings}`);
+    if (pathWarnings > 0) parts.push(`path_warn=${pathWarnings}`);
+    if (hadTurnCompleted) parts.push('etat=completed');
+    if (hadTurnFailed) parts.push('etat=failed');
+    process.stdout.write(`${parts.join(' | ')}\n`);
+  };
+
+  return {
+    start,
+    setStatus,
+    handleStdoutLine,
+    handleStderrLine,
+    finish,
+  };
 }
 
 async function runMcpHandshake(token) {
@@ -1120,10 +1294,20 @@ async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
     `codex-summary-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
   );
   const summaryStartedAt = Date.now();
-  if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
-    console.log(`Headless mode: résumé ${projectKey} via codex exec (verbose détaillé).`);
-    console.log(`Headless mode: [codex:${projectKey}] streaming JSON/debug actif...`);
+  const shouldShowCodexStream = Boolean(CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE);
+  const rawLogMode = CODEX_SUMMARY_LOG_STYLE === 'raw';
+  const streamPrefix = `Headless mode: [codex:${projectKey}]`;
+  const digestLogger = shouldShowCodexStream
+    ? createDigestConsoleLogger(streamPrefix, {
+        uiEnabled: CODEX_SUMMARY_CLI_UI,
+        rawMode: rawLogMode,
+      })
+    : null;
+  if (digestLogger) {
+    digestLogger.start();
+    digestLogger.setStatus(rawLogMode ? 'stream brut actif' : 'mode digest filtre actif');
   }
+
   const result = await runCommand(
     'codex',
     [
@@ -1143,23 +1327,33 @@ async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
       timeoutMs: CODEX_SUMMARY_TIMEOUT_MS,
       env: {
         CODEX_OTEL_ENABLED: 'false',
-        ...(CODEX_SUMMARY_VERBOSE ? { RUST_LOG: CODEX_SUMMARY_RUST_LOG } : {}),
+        ...(shouldShowCodexStream ? { RUST_LOG: CODEX_SUMMARY_RUST_LOG } : {}),
       },
-      onStdoutLine: CODEX_SUMMARY_VERBOSE
+      onStdoutLine: shouldShowCodexStream
         ? (line) => {
-            console.log(`[codex:${projectKey}] ${line}`);
+            if (rawLogMode) {
+              console.log(`${streamPrefix} stdout: ${line}`);
+              return;
+            }
+            digestLogger?.handleStdoutLine(line);
           }
         : undefined,
-      onStderrLine: CODEX_SUMMARY_VERBOSE
+      onStderrLine: shouldShowCodexStream
         ? (line) => {
-            console.log(`[codex:${projectKey}:stderr] ${line}`);
+            if (rawLogMode) {
+              console.log(`${streamPrefix} stderr: ${line}`);
+              return;
+            }
+            digestLogger?.handleStderrLine(line);
           }
         : undefined,
     }
   );
-  if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
-    const elapsedMs = Date.now() - summaryStartedAt;
-    console.log(`Headless mode: [codex:${projectKey}] fin (code=${result.code}, durée=${elapsedMs} ms).`);
+  if (digestLogger) {
+    digestLogger.finish({
+      code: result.code,
+      elapsedMs: Date.now() - summaryStartedAt,
+    });
   }
   let codexOutput = result.stdout;
   if (await fileExists(outputLastMessagePath)) {
