@@ -166,6 +166,7 @@ const CODEX_SUMMARY_VERBOSE = String(process.env.CODEX_SUMMARY_VERBOSE || 'true'
 const CODEX_SUMMARY_RUST_LOG = String(process.env.CODEX_SUMMARY_RUST_LOG || 'warn').trim() || 'warn';
 const CODEX_SUMMARY_LOG_STYLE = String(process.env.CODEX_SUMMARY_LOG_STYLE || 'digest').trim().toLowerCase();
 const CODEX_SUMMARY_CLI_UI = String(process.env.CODEX_SUMMARY_CLI_UI || 'true').trim().toLowerCase() !== 'false';
+const HEADLESS_PROGRESS_INTERVAL_MS = Math.max(5000, Number(process.env.HEADLESS_PROGRESS_INTERVAL_MS || 30000));
 const CODEX_SUMMARY_REASONING = (() => {
   const requested = String(process.env.CODEX_SUMMARY_REASONING || 'detailed').trim().toLowerCase();
   return ['auto', 'concise', 'detailed', 'none'].includes(requested) ? requested : 'detailed';
@@ -418,6 +419,42 @@ function parseJsonLine(line) {
     return JSON.parse(line);
   } catch {
     return null;
+  }
+}
+
+function formatDurationMs(ms) {
+  const totalMs = Math.max(0, Number(ms || 0));
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
+}
+
+async function runHeadlessStage(label, task, options = {}) {
+  const start = Date.now();
+  const heartbeat = options.heartbeat !== false;
+  const intervalMs = Number(options.intervalMs || HEADLESS_PROGRESS_INTERVAL_MS);
+  console.log(`Headless mode: ${label}...`);
+  const intervalId = heartbeat
+    ? setInterval(() => {
+        const elapsed = formatDurationMs(Date.now() - start);
+        console.log(`Headless mode: ${label} en cours (${elapsed})...`);
+      }, intervalMs)
+    : null;
+
+  try {
+    const result = await task();
+    const elapsed = formatDurationMs(Date.now() - start);
+    console.log(`Headless mode: ${label} terminé (${elapsed}).`);
+    return result;
+  } catch (error) {
+    const elapsed = formatDurationMs(Date.now() - start);
+    const message = error?.message ? `: ${error.message}` : '';
+    console.log(`Headless mode: ${label} échec (${elapsed})${message}`);
+    throw error;
+  } finally {
+    if (intervalId) clearInterval(intervalId);
   }
 }
 
@@ -3102,24 +3139,42 @@ async function runHeadlessExports(options) {
   await fs.mkdir(outputDir, { recursive: true });
 
   console.log('Headless mode: collecte des données 2025...');
-  const [report, leaves] = await Promise.all([
-    collectWorkedHours2025(token, [BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY], userEmail),
-    collectAnnualLeaves2025(token, LEAVE_ANCHOR_ISSUE_KEY, userEmail),
-  ]);
-  const context = buildExportContext(report, leaves, userEmail);
+  const reportPromise = runHeadlessStage(
+    'analyse des heures projets',
+    () => collectWorkedHours2025(token, [BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY], userEmail)
+  );
+  const leavesPromise = runHeadlessStage(
+    'analyse des congés/absences',
+    () => collectAnnualLeaves2025(token, LEAVE_ANCHOR_ISSUE_KEY, userEmail)
+  );
+  const [report, leaves] = await Promise.all([reportPromise, leavesPromise]);
+
+  const context = await runHeadlessStage(
+    'préparation du contexte export',
+    async () => buildExportContext(report, leaves, userEmail),
+    { heartbeat: false }
+  );
   const safeDate = new Date().toISOString().slice(0, 10);
   const baseName = `worklog-cse-${context.exportIdentity.filePart}-${safeDate}`;
   const generatedFiles = [];
 
   if (shouldExportXlsx) {
     const xlsxPath = path.join(outputDir, `${baseName}.xlsx`);
-    await writeHeadlessXlsx(xlsxPath, context);
+    await runHeadlessStage(
+      `génération Excel (${path.basename(xlsxPath)})`,
+      () => writeHeadlessXlsx(xlsxPath, context),
+      { heartbeat: false }
+    );
     generatedFiles.push(xlsxPath);
   }
 
   if (shouldExportPdf) {
     const pdfPath = path.join(outputDir, `${baseName}.pdf`);
-    await writeHeadlessPdf(pdfPath, context);
+    await runHeadlessStage(
+      `génération PDF (${path.basename(pdfPath)})`,
+      () => writeHeadlessPdf(pdfPath, context),
+      { heartbeat: true }
+    );
     generatedFiles.push(pdfPath);
   }
 

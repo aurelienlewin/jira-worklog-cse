@@ -159,6 +159,7 @@ Notes:
 - pour activer/désactiver la mini UI CLI (spinner + statut): `CODEX_SUMMARY_CLI_UI=true|false`.
 - pour ajuster le niveau de logs runtime: `CODEX_SUMMARY_RUST_LOG=debug` (ou `info`, `warn`, ... ; défaut `warn`).
 - pour ajuster le niveau de résumé de raisonnement: `CODEX_SUMMARY_REASONING=concise|detailed|auto|none`.
+- pour la progression headless globale (phases longues), heartbeat toutes les `30s` par défaut: `HEADLESS_PROGRESS_INTERVAL_MS=30000`.
 - si la sortie tarde à cause de tentatives de reconnexion, réduisez les retries:
 
 ```bash
