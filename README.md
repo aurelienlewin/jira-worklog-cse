@@ -1,158 +1,149 @@
 # Worklog CSE
 
-Application locale (React + Node.js) pour visualiser simplement les heures 2025, les congés/absences, et exporter un fichier Excel lisible.
+App locale (React + Node.js) pour récupérer les heures 2025, les congés/absences, puis exporter en `.xlsx` et `.pdf`.
 
-## Ce que fait l'outil
+## TL;DR
 
-- guide pas à pas pour saisir votre clé d'accès,
-- configure automatiquement votre connecteur MCP,
-- vérifie la connexion,
-- calcule les heures travaillées par projet,
-- calcule les heures/jours de congés et absences,
-- n'affiche pas les tickets congés/absences à 0h,
-- masque les blocs résumé/détail bench et congés quand le total est à 0h,
-- affiche un taux bench et un taux d'utilisation,
-- propose des détails (types d'issue, sous-tâches, tickets complets),
-- propose des détails projet pour le scope bench et pour `ROEMO` (types d'issue, sous-tâches, tickets complets),
-- masque les sections "Sous-tâches" lorsqu'elles sont vides,
-- affiche l'avatar de l'utilisateur analysé (si disponible),
-- renforce la récupération de l'avatar (normalisation + fallback image embarquée),
-- résume les commentaires bench (avec Codex + fallback local),
-- permet d'interrompre une session restaurée et d'annuler les requêtes en cours,
-- exporte un `.xlsx` enrichi (synthèse visuelle),
-- propose un export PDF complet avec une mise en page proche de l'interface,
-- ouvre une fenêtre d'impression PDF fiable (sans faux positif de popup bloquée).
-
-## Parcours utilisateur
-
-1. Créer un jeton personnel.
-2. Lire le guide de configuration.
-3. Coller la clé + lancer la configuration.
-4. Charger les données 2025 et exporter.
-
-L'interface est en français, orientée non technique, avec:
-
-- stepper clair,
-- états de chargement visibles,
-- toasts flottants cumulables et dismissables (erreurs persistantes jusqu'au clic),
-- navigation clavier,
-- focus visibles,
-- focus automatique cohérent pendant les progressions (collecte/configuration/vérification), puis redirection vers la section utile,
-- arrêt manuel de session (même pendant une collecte auto-restaurée),
-- rendu SSR en production.
-
-## Prérequis
-
-- Node.js 20+
-- npm
-- Codex CLI installé localement
-- Accès à votre instance de suivi de tickets
-
-## Lancer en local
+### Option 1: Interface guidée (simple)
 
 ```bash
 npm install
 npm run dev
 ```
 
+Puis ouvrir `http://localhost:5173`.
+
+### Option 2: Export direct en CLI (headless)
+
+```bash
+npm install
+npm start -- --headless -u user@domain.com -t <votre_token>
+```
+
+Génère par défaut les 2 fichiers: `.xlsx` + `.pdf`.
+
+## Pour qui ?
+
+- Utilisateur non technique: utilisez l'interface web en 4 étapes.
+- Développeur / automatisation: utilisez le mode headless.
+
+## Ce que fait l'outil
+
+- Guide pas-à-pas pour la connexion.
+- Vérification de la clé d'accès.
+- Calcul des heures par projet (2025).
+- Calcul des heures/jours de congés et absences.
+- Résumés bench et détails par scopes (`BENCH`, `ROEMO`).
+- Export Excel riche (`.xlsx`).
+- Export PDF avec rendu proche de l'UI (avatar + cercles de progression inclus).
+
+## Prérequis
+
+- Node.js 20+
+- npm
+- Accès à votre instance de suivi de tickets
+- Codex CLI (requis pour la configuration MCP automatique depuis l'UI)
+- Google Chrome (requis pour générer le PDF en mode headless)
+
+## Installation (une seule fois)
+
+```bash
+npm install
+cp .env.example .env.local
+```
+
+Puis adaptez au minimum dans `.env.local`:
+
+```bash
+ISSUE_TRACKER_URL="https://example.com"
+BENCH_SCOPE_KEY="BENCH"
+ROEMO_SCOPE_KEY="ROEMO"
+LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
+```
+
+## Utilisation: interface web (recommandé pour débuter)
+
+1. Lancez l'app:
+
+```bash
+npm run dev
+```
+
+2. Ouvrez:
+
 - Frontend: `http://localhost:5173`
 - API: `http://127.0.0.1:8787`
 
-## Démarrage direct en étape 4 (CLI)
+3. Suivez les étapes UI:
 
-Vous pouvez lancer l'API avec un token et un e-mail cible pour ouvrir directement l'étape 4 au chargement de la page:
+- créer/entrer le token,
+- vérifier la connexion,
+- charger les données 2025,
+- exporter.
+
+### Démarrage direct en étape 4 (avec token CLI)
 
 ```bash
 npm start -- -u user@domain.com -t <votre_token>
 ```
 
-Équivalents supportés:
+Alias acceptés:
 
 - `--user user@domain.com` ou `--user=user@domain.com`
 - `--token <votre_token>` ou `--token=<votre_token>`
 
-En mode développement API seul:
+## Utilisation: mode headless (dev/CI/scripts)
 
-```bash
-npm run dev:api -- -u user@domain.com -t <votre_token>
-```
-
-## Export headless (sans interface UI)
-
-Vous pouvez générer les exports directement en CLI, sans démarrer l'interface:
+### Commande standard
 
 ```bash
 npm start -- --headless -u user@domain.com -t <votre_token>
 ```
 
-Comportement par défaut en mode headless:
+Comportement:
 
-- génère **les deux fichiers**: `.xlsx` et `.pdf`,
-- reprend le même rendu visuel que l'export UI (avatar + cercles de progression inclus dans le PDF),
+- collecte les données 2025,
+- génère `.xlsx` + `.pdf`,
 - écrit les fichiers dans le dossier courant,
-- puis quitte le process (pas de serveur web lancé).
+- termine le process (pas de serveur web).
 
-Prérequis PDF headless:
+### Options
 
-- Google Chrome installé localement (utilisé en mode headless pour produire le PDF).
-
-Options utiles:
-
-- `--xlsx` ou `--xls`: export Excel (`.xlsx`) uniquement
+- `--xlsx` ou `--xls`: export Excel uniquement
 - `--pdf`: export PDF uniquement
 - `-o ./exports` ou `--output-dir=./exports`: dossier de sortie
+- `--no-ui`: alias de `--headless`
 
-Exemples:
+### Exemples
 
 ```bash
-# Excel + PDF (par défaut)
+# Excel + PDF (défaut)
 npm start -- --headless -u user@domain.com -t <votre_token>
 
-# Excel seulement
+# Excel uniquement
 npm start -- --headless --xls -u user@domain.com -t <votre_token>
 
-# PDF seulement dans ./out
+# PDF uniquement, dans ./out
 npm start -- --headless --pdf -o ./out -u user@domain.com -t <votre_token>
+
+# Headless avec token déjà configuré dans ~/.codex/config.toml
+npm start -- --headless
 ```
 
-## Variables recommandées
+## Scripts utiles
 
-Copier `.env.example` vers `.env.local` puis adapter les valeurs:
+- `npm run dev`: API + frontend
+- `npm run dev:api`: API seule (nodemon)
+- `npm run dev:web`: frontend seul (Vite)
+- `npm run build`: build frontend + SSR
+- `npm start`: API prod (sert aussi le frontend buildé)
 
-```bash
-cp .env.example .env.local
+## Dépannage rapide
 
-# Frontend
-VITE_TOKEN_HELP_URL="https://example.com/token"
-VITE_SETUP_GUIDE_URL="https://example.com/guide"
-VITE_ISSUE_BROWSE_BASE_URL="https://example.com"
-VITE_BENCH_SCOPE_KEY="BENCH"
-VITE_ROEMO_SCOPE_KEY="ROEMO"
-VITE_LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
-VITE_LEAVE_SCOPE_LABEL="ABS-*"
-
-# API
-ISSUE_TRACKER_URL="https://example.com"
-BENCH_SCOPE_KEY="BENCH"
-ROEMO_SCOPE_KEY="ROEMO"
-LEAVE_ANCHOR_ISSUE_KEY="ABS-1"
-WORKING_DAY_HOURS="7"
-MCP_SERVER_SECTION="issue-tracker"
-```
-
-Notes:
-
-- l'API charge `.env` puis `.env.local` au démarrage (`.env.local` est prioritaire),
-- si `ISSUE_TRACKER_URL` reste sur une valeur placeholder (`example.com`), l'API bloque les appels avec un message de configuration explicite.
-- les données de l'étape 4 (rapports) sont restaurées localement après rechargement de page, sans collecte automatique,
-- une nouvelle collecte est faite uniquement après changement de clé/utilisateur (vérification) ou via le bouton manuel de rafraîchissement.
-- les noms de fichiers d'export incluent l'identité de l'utilisateur ciblé (nom/prénom ou fallback e-mail).
-
-## Scripts
-
-- `npm run dev`: démarre API + frontend
-- `npm run build`: build frontend + bundle SSR serveur
-- `npm start`: démarre l'API et sert le frontend
+- Erreur `ISSUE_TRACKER_URL` placeholder: mettez une vraie URL dans `.env.local` (pas `example.com`).
+- Headless PDF en échec: vérifiez que Google Chrome est installé.
+- Aucun token trouvé en headless: passez `-t <token>` ou configurez `~/.codex/config.toml`.
+- L'e-mail `-u` n'est pas trouvé: l'app bascule automatiquement sur le compte de la clé.
 
 ## Open Source
 
@@ -162,21 +153,6 @@ Notes:
 - Sécurité: [SECURITY.md](./SECURITY.md)
 - Historique: [CHANGELOG.md](./CHANGELOG.md)
 
-## Soutenir ce projet
+## Soutenir
 
-Ce projet est né un vendredi 13, dans un matin encore calme.
-Un clin d'œil à la chance, peut-être. Ou juste le bon moment.
-
-Il a été construit sur mon temps perso, sur mon ordinateur perso,
-avec mes propres tokens Codex.
-
-L'idée était simple: apporter un peu d'air, un peu d'ordre,
-un outil qui aide sans bruit, quand les périodes deviennent plus rudes.
-
-On ne dit pas toujours tout à voix haute.
-Parfois, on se contente d'être là, de faire quelque chose d'utile,
-et de laisser une lumière douce pour celles et ceux qui continuent la route.
-
-Si ce travail vous aide, vous pouvez soutenir le projet ici:
-
-- Ko-fi: https://ko-fi.com/aurelienlewin
+Ko-fi: https://ko-fi.com/aurelienlewin
