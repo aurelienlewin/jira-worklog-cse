@@ -132,7 +132,14 @@ npm start -- --headless
 
 ### Mode verbeux (diagnostic headless)
 
-Pour observer le détail des événements d'exécution (utile en cas de latence avant la fin du process):
+Le mode verbose est désormais activé par défaut pour les résumés `codex exec` lancés en headless:
+
+- flux d'événements JSON (`--json`),
+- progression curseur (`--progress-cursor`),
+- résumé de raisonnement `model_reasoning_summary="detailed"`,
+- logs runtime via `RUST_LOG=info`.
+
+Si vous voulez reproduire manuellement le même comportement:
 
 ```bash
 RUST_LOG=info codex exec \
@@ -146,6 +153,9 @@ Notes:
 
 - `--json` affiche le flux d'événements (progression, erreurs, fin de tour).
 - `model_reasoning_summary="detailed"` active un résumé de raisonnement quand le provider le supporte.
+- pour désactiver le mode verbose par défaut dans l'app: `CODEX_SUMMARY_VERBOSE=false`.
+- pour ajuster le niveau de logs runtime: `CODEX_SUMMARY_RUST_LOG=debug` (ou `info`, `warn`, ...).
+- pour ajuster le niveau de résumé de raisonnement: `CODEX_SUMMARY_REASONING=concise|detailed|auto|none`.
 - si la sortie tarde à cause de tentatives de reconnexion, réduisez les retries:
 
 ```bash

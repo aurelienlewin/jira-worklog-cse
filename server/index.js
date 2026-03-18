@@ -162,6 +162,12 @@ const LEAVE_ANCHOR_ISSUE_KEY = String(process.env.LEAVE_ANCHOR_ISSUE_KEY || 'ABS
 const WORKING_DAY_HOURS = Number(process.env.WORKING_DAY_HOURS || 7);
 const MAX_COMMENT_SAMPLES_PER_PROJECT = Number(process.env.MAX_COMMENT_SAMPLES_PER_PROJECT || 120);
 const CODEX_SUMMARY_TIMEOUT_MS = Number(process.env.CODEX_SUMMARY_TIMEOUT_MS || 45000);
+const CODEX_SUMMARY_VERBOSE = String(process.env.CODEX_SUMMARY_VERBOSE || 'true').trim().toLowerCase() !== 'false';
+const CODEX_SUMMARY_RUST_LOG = String(process.env.CODEX_SUMMARY_RUST_LOG || 'info').trim() || 'info';
+const CODEX_SUMMARY_REASONING = (() => {
+  const requested = String(process.env.CODEX_SUMMARY_REASONING || 'detailed').trim().toLowerCase();
+  return ['auto', 'concise', 'detailed', 'none'].includes(requested) ? requested : 'detailed';
+})();
 const AVATAR_FETCH_TIMEOUT_MS = Number(process.env.AVATAR_FETCH_TIMEOUT_MS || 8000);
 const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 256 * 1024);
 const BENCH_SCOPE_KEY = String(process.env.BENCH_SCOPE_KEY || 'BENCH').trim().toUpperCase();
@@ -286,10 +292,18 @@ function runCommand(command, args, options = {}) {
     let killedByTimeout = false;
 
     child.stdout.on('data', (d) => {
-      stdout += String(d);
+      const chunk = String(d);
+      stdout += chunk;
+      if (options.mirrorStdout) {
+        process.stderr.write(chunk);
+      }
     });
     child.stderr.on('data', (d) => {
-      stderr += String(d);
+      const chunk = String(d);
+      stderr += chunk;
+      if (options.mirrorStderr) {
+        process.stderr.write(chunk);
+      }
     });
 
     if (options.timeoutMs) {
@@ -1078,26 +1092,59 @@ async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
     });
 
   const prompt = buildCodexBenchPrompt(projectKey, sortedEntries, heuristic);
+  const outputLastMessagePath = path.join(
+    os.tmpdir(),
+    `codex-summary-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
+  );
+  if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
+    console.log(`Headless mode: résumé ${projectKey} via codex exec (verbose).`);
+  }
   const result = await runCommand(
     'codex',
-    ['exec', '--skip-git-repo-check', '-C', process.cwd(), prompt],
+    [
+      'exec',
+      '--skip-git-repo-check',
+      '--json',
+      '--progress-cursor',
+      '-c',
+      `model_reasoning_summary="${CODEX_SUMMARY_REASONING}"`,
+      '-C',
+      process.cwd(),
+      '-o',
+      outputLastMessagePath,
+      prompt,
+    ],
     {
       timeoutMs: CODEX_SUMMARY_TIMEOUT_MS,
       env: {
         CODEX_OTEL_ENABLED: 'false',
+        ...(CODEX_SUMMARY_VERBOSE ? { RUST_LOG: CODEX_SUMMARY_RUST_LOG } : {}),
       },
+      mirrorStdout: CODEX_SUMMARY_VERBOSE,
+      mirrorStderr: CODEX_SUMMARY_VERBOSE,
     }
   );
+  let codexOutput = result.stdout;
+  if (await fileExists(outputLastMessagePath)) {
+    codexOutput = await fs.readFile(outputLastMessagePath, 'utf8');
+    await fs.unlink(outputLastMessagePath).catch(() => {});
+  }
 
   if (result.code !== 0) {
+    if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
+      console.log(`Headless mode: résumé ${projectKey} en mode secours local (codex indisponible).`);
+    }
     return {
       ...heuristic,
       source: 'heuristic_fallback',
     };
   }
 
-  const parsed = safeJsonObjectFromText(result.stdout);
+  const parsed = safeJsonObjectFromText(codexOutput);
   if (!parsed || typeof parsed !== 'object') {
+    if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
+      console.log(`Headless mode: résumé ${projectKey} en mode secours local (réponse codex invalide).`);
+    }
     return {
       ...heuristic,
       source: 'heuristic_fallback',
