@@ -137,7 +137,8 @@ Le mode verbose est désormais activé par défaut pour les résumés `codex exe
 - flux d'événements JSON (`--json`),
 - progression curseur (`--progress-cursor`),
 - résumé de raisonnement `model_reasoning_summary="detailed"`,
-- logs runtime via `RUST_LOG=info`.
+- logs runtime via `RUST_LOG=info`,
+- affichage ligne par ligne dans la sortie headless avec préfixes `[codex:<scope>]`.
 
 Si vous voulez reproduire manuellement le même comportement:
 

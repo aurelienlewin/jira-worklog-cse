@@ -290,19 +290,38 @@ function runCommand(command, args, options = {}) {
     let stderr = '';
     let timeoutId;
     let killedByTimeout = false;
+    const mirrorStdoutStream = options.mirrorStdoutTo === 'stderr' ? process.stderr : process.stdout;
+    const mirrorStderrStream = options.mirrorStderrTo === 'stderr' ? process.stderr : process.stdout;
+    const stdoutLineReader = options.onStdoutLine ? readline.createInterface({ input: child.stdout }) : null;
+    const stderrLineReader = options.onStderrLine ? readline.createInterface({ input: child.stderr }) : null;
+
+    if (stdoutLineReader) {
+      stdoutLineReader.on('line', (line) => {
+        try {
+          options.onStdoutLine(line);
+        } catch {}
+      });
+    }
+    if (stderrLineReader) {
+      stderrLineReader.on('line', (line) => {
+        try {
+          options.onStderrLine(line);
+        } catch {}
+      });
+    }
 
     child.stdout.on('data', (d) => {
       const chunk = String(d);
       stdout += chunk;
       if (options.mirrorStdout) {
-        process.stderr.write(chunk);
+        mirrorStdoutStream.write(chunk);
       }
     });
     child.stderr.on('data', (d) => {
       const chunk = String(d);
       stderr += chunk;
       if (options.mirrorStderr) {
-        process.stderr.write(chunk);
+        mirrorStderrStream.write(chunk);
       }
     });
 
@@ -315,11 +334,15 @@ function runCommand(command, args, options = {}) {
 
     child.on('close', (code, signal) => {
       if (timeoutId) clearTimeout(timeoutId);
+      if (stdoutLineReader) stdoutLineReader.close();
+      if (stderrLineReader) stderrLineReader.close();
       resolve({ code, signal, stdout, stderr, killedByTimeout });
     });
 
     child.on('error', (err) => {
       if (timeoutId) clearTimeout(timeoutId);
+      if (stdoutLineReader) stdoutLineReader.close();
+      if (stderrLineReader) stderrLineReader.close();
       resolve({
         code: -1,
         signal: null,
@@ -1096,8 +1119,10 @@ async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
     os.tmpdir(),
     `codex-summary-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
   );
+  const summaryStartedAt = Date.now();
   if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
-    console.log(`Headless mode: résumé ${projectKey} via codex exec (verbose).`);
+    console.log(`Headless mode: résumé ${projectKey} via codex exec (verbose détaillé).`);
+    console.log(`Headless mode: [codex:${projectKey}] streaming JSON/debug actif...`);
   }
   const result = await runCommand(
     'codex',
@@ -1120,10 +1145,22 @@ async function summarizeBenchCommentsWithCodex(projectKey, commentEntries) {
         CODEX_OTEL_ENABLED: 'false',
         ...(CODEX_SUMMARY_VERBOSE ? { RUST_LOG: CODEX_SUMMARY_RUST_LOG } : {}),
       },
-      mirrorStdout: CODEX_SUMMARY_VERBOSE,
-      mirrorStderr: CODEX_SUMMARY_VERBOSE,
+      onStdoutLine: CODEX_SUMMARY_VERBOSE
+        ? (line) => {
+            console.log(`[codex:${projectKey}] ${line}`);
+          }
+        : undefined,
+      onStderrLine: CODEX_SUMMARY_VERBOSE
+        ? (line) => {
+            console.log(`[codex:${projectKey}:stderr] ${line}`);
+          }
+        : undefined,
     }
   );
+  if (CLI_LAUNCH_OPTIONS.headless && CODEX_SUMMARY_VERBOSE) {
+    const elapsedMs = Date.now() - summaryStartedAt;
+    console.log(`Headless mode: [codex:${projectKey}] fin (code=${result.code}, durée=${elapsedMs} ms).`);
+  }
   let codexOutput = result.stdout;
   if (await fileExists(outputLastMessagePath)) {
     codexOutput = await fs.readFile(outputLastMessagePath, 'utf8');
