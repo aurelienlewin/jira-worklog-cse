@@ -77,6 +77,44 @@ En mode développement API seul:
 npm run dev:api -- -u user@domain.com -t <votre_token>
 ```
 
+## Export headless (sans interface UI)
+
+Vous pouvez générer les exports directement en CLI, sans démarrer l'interface:
+
+```bash
+npm start -- --headless -u user@domain.com -t <votre_token>
+```
+
+Comportement par défaut en mode headless:
+
+- génère **les deux fichiers**: `.xlsx` et `.pdf`,
+- reprend le même rendu visuel que l'export UI (avatar + cercles de progression inclus dans le PDF),
+- écrit les fichiers dans le dossier courant,
+- puis quitte le process (pas de serveur web lancé).
+
+Prérequis PDF headless:
+
+- Google Chrome installé localement (utilisé en mode headless pour produire le PDF).
+
+Options utiles:
+
+- `--xlsx` ou `--xls`: export Excel (`.xlsx`) uniquement
+- `--pdf`: export PDF uniquement
+- `-o ./exports` ou `--output-dir=./exports`: dossier de sortie
+
+Exemples:
+
+```bash
+# Excel + PDF (par défaut)
+npm start -- --headless -u user@domain.com -t <votre_token>
+
+# Excel seulement
+npm start -- --headless --xls -u user@domain.com -t <votre_token>
+
+# PDF seulement dans ./out
+npm start -- --headless --pdf -o ./out -u user@domain.com -t <votre_token>
+```
+
 ## Variables recommandées
 
 Copier `.env.example` vers `.env.local` puis adapter les valeurs:

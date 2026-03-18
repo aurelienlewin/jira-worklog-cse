@@ -15,6 +15,10 @@ function parseCliLaunchOptions(argv = process.argv.slice(2)) {
   const options = {
     token: '',
     userEmail: '',
+    headless: false,
+    exportPdf: false,
+    exportXlsx: false,
+    outputDir: process.cwd(),
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -46,6 +50,38 @@ function parseCliLaunchOptions(argv = process.argv.slice(2)) {
 
     if (arg.startsWith('--user=')) {
       options.userEmail = String(arg.slice('--user='.length) || '').trim();
+      continue;
+    }
+
+    if (arg === '--headless' || arg === '--no-ui') {
+      options.headless = true;
+      continue;
+    }
+
+    if (arg === '--pdf') {
+      options.exportPdf = true;
+      continue;
+    }
+
+    if (arg === '--xls' || arg === '--xlsx') {
+      options.exportXlsx = true;
+      continue;
+    }
+
+    if (arg === '-o' || arg === '--output-dir') {
+      const raw = String(argv[index + 1] || '').trim();
+      if (raw) {
+        options.outputDir = raw;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--output-dir=')) {
+      const raw = String(arg.slice('--output-dir='.length) || '').trim();
+      if (raw) {
+        options.outputDir = raw;
+      }
     }
   }
 
@@ -130,6 +166,11 @@ const AVATAR_FETCH_TIMEOUT_MS = Number(process.env.AVATAR_FETCH_TIMEOUT_MS || 80
 const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 256 * 1024);
 const BENCH_SCOPE_KEY = String(process.env.BENCH_SCOPE_KEY || 'BENCH').trim().toUpperCase();
 const ROEMO_SCOPE_KEY = String(process.env.ROEMO_SCOPE_KEY || 'ROEMO').trim().toUpperCase();
+const LEAVE_SCOPE_LABEL = String(
+  process.env.LEAVE_SCOPE_LABEL ||
+  `${(LEAVE_ANCHOR_ISSUE_KEY.split('-')[0] || 'ABS').toUpperCase()}-*`
+).trim();
+const HAS_DISTINCT_ROEMO_SCOPE = Boolean(ROEMO_SCOPE_KEY && ROEMO_SCOPE_KEY !== BENCH_SCOPE_KEY);
 const CODEX_SUMMARY_PROJECT_KEYS = [...new Set([BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY])].filter(Boolean);
 const DEFAULT_DETAILED_PROJECT_KEYS = [];
 const CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
@@ -1649,6 +1690,1150 @@ async function collectAnnualLeaves2025(token, rootIssueKey = LEAVE_ANCHOR_ISSUE_
   };
 }
 
+function formatNumberForExport(value) {
+  return Number(value || 0).toLocaleString('fr-FR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatPercentForExport(value) {
+  return `${Number(value || 0).toLocaleString('fr-FR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} %`;
+}
+
+function clampPercent(value) {
+  const num = Number(value || 0);
+  if (Number.isNaN(num)) return 0;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return num;
+}
+
+function sanitizeFilePart(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 48);
+}
+
+function safeText(value) {
+  return String(value ?? '').trim();
+}
+
+function getInitials(value) {
+  const text = safeText(value);
+  if (!text) return '?';
+  const compact = text
+    .replace(/[_\-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!compact.length) return text.slice(0, 1).toUpperCase();
+  if (compact.length === 1) return compact[0].slice(0, 1).toUpperCase();
+  return `${compact[0].slice(0, 1)}${compact[1].slice(0, 1)}`.toUpperCase();
+}
+
+function buildExportIdentity(report, leaves, requestedEmail) {
+  const fromReport = report?.user || null;
+  const fromLeaves = leaves?.user || null;
+  const displayName = safeText(fromLeaves?.displayName || fromReport?.displayName || '');
+  const resolvedEmail = safeText(fromLeaves?.resolvedEmail || fromReport?.resolvedEmail || requestedEmail || '');
+  const fallbackLabel = displayName || resolvedEmail || 'mon-compte';
+  const filePart =
+    sanitizeFilePart(displayName) ||
+    sanitizeFilePart(resolvedEmail.split('@')[0] || resolvedEmail) ||
+    'mon-compte';
+
+  return {
+    displayName: displayName || null,
+    resolvedEmail: resolvedEmail || null,
+    label: fallbackLabel,
+    filePart,
+  };
+}
+
+function buildLeavesDetailsForExport(leaves) {
+  const issues = leaves?.issues || [];
+  const subtasks = [];
+  let computedSubtaskSeconds = 0;
+
+  for (const issue of issues) {
+    if (issue?.isSubtask || issue?.parentKey) {
+      subtasks.push(issue);
+      computedSubtaskSeconds += Number(issue?.seconds || 0);
+    }
+  }
+
+  const issueTypeTotals =
+    Array.isArray(leaves?.issueTypeTotals) && leaves.issueTypeTotals.length
+      ? leaves.issueTypeTotals
+      : [];
+
+  const subtaskCount = Number(leaves?.subtaskCount ?? subtasks.length);
+  const subtaskHours = Number(leaves?.subtaskHours ?? Number((computedSubtaskSeconds / 3600).toFixed(2)));
+
+  return {
+    issueTypeTotals,
+    subtasks,
+    subtaskCount,
+    subtaskHours,
+  };
+}
+
+function buildNarrativeForProject(projectDetails, projectKey, label = projectKey) {
+  if (!projectDetails?.issues?.length) {
+    return `Aucune activité ${label} détectée pour 2025.`;
+  }
+  const topType = projectDetails.issueTypeTotals?.[0];
+  const topIssue = projectDetails.issues?.[0];
+  const subtaskShare =
+    Number(projectDetails.issueHours || 0) > 0
+      ? (Number(projectDetails.subtaskHours || 0) / Number(projectDetails.issueHours || 0)) * 100
+      : 0;
+  const parts = [
+    `Vous avez saisi ${formatNumberForExport(projectDetails.issueHours)} h sur ${projectDetails.issueCount} tickets ${label}.`,
+    topType ? `Le type principal est "${topType.issueType}" avec ${formatNumberForExport(topType.hours)} h.` : null,
+    `Les sous-tâches représentent ${formatPercentForExport(subtaskShare)} du temps ${label}.`,
+    topIssue ? `Le ticket le plus chargé est ${topIssue.issueKey} (${formatNumberForExport(topIssue.hours)} h).` : null,
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
+function buildAnalysisInfo(report, leaves, requestedEmail) {
+  const fromReport = report?.user || null;
+  const fromLeaves = leaves?.user || null;
+  const resolvedEmail =
+    fromLeaves?.resolvedEmail ||
+    fromReport?.resolvedEmail ||
+    safeText(requestedEmail) ||
+    'Votre compte';
+  const mode = fromLeaves?.mode || fromReport?.mode || 'current';
+  const displayName =
+    fromLeaves?.displayName ||
+    fromReport?.displayName ||
+    '';
+  const avatarUrl =
+    fromLeaves?.avatarDataUrl ||
+    fromReport?.avatarDataUrl ||
+    fromLeaves?.avatarUrl ||
+    fromReport?.avatarUrl ||
+    '';
+  const fallback = mode === 'fallback_current';
+  const delegated = mode === 'delegated';
+
+  let message = 'Analyse de vos données.';
+  if (delegated) {
+    message = "Analyse d’un autre compte (selon les droits de votre clé d'accès).";
+  } else if (fallback) {
+    message = "L'e-mail demandé n'a pas été trouvé: affichage de votre compte.";
+  }
+
+  return { resolvedEmail, mode, message, fallback, delegated, displayName, avatarUrl };
+}
+
+function buildProgressCircles(summary) {
+  const trackedHours = summary.workedHours + summary.leavesHours;
+  const workedShare = trackedHours > 0 ? (summary.workedHours / trackedHours) * 100 : 0;
+  const leavesShare = trackedHours > 0 ? (summary.leavesHours / trackedHours) * 100 : 0;
+  const circles = [
+    {
+      title: 'Utilisation',
+      subtitle: '100 % - taux bench',
+      value: summary.utilizationRate,
+      tone: 'leaf',
+    },
+    {
+      title: 'Part heures travaillées',
+      subtitle: `${formatNumberForExport(summary.workedHours)} h`,
+      value: workedShare,
+      tone: 'sky',
+    },
+  ];
+
+  if (Number(summary.benchHours || 0) > 0) {
+    circles.push({
+      title: 'Part bench',
+      subtitle: `${formatNumberForExport(summary.benchHours)} h sur vos heures 2025`,
+      value: summary.benchRate,
+      tone: 'sun',
+    });
+  }
+
+  if (Number(summary.leavesHours || 0) > 0) {
+    circles.push({
+      title: 'Part congés/absences',
+      subtitle: `${formatNumberForExport(summary.leavesHours)} h (${formatNumberForExport(summary.leavesDays)} jours)`,
+      value: leavesShare,
+      tone: 'rose',
+    });
+  }
+
+  return circles;
+}
+
+function buildExportContext(report, leaves, requestedEmail) {
+  const projectByKey = new Map();
+  const detailedByKey = new Map();
+
+  for (const project of report?.projects || []) {
+    const key = safeText(project?.projectKey).toUpperCase();
+    if (!key || projectByKey.has(key)) continue;
+    projectByKey.set(key, project);
+  }
+
+  for (const project of report?.detailedProjects || []) {
+    const key = safeText(project?.projectKey).toUpperCase();
+    if (!key || detailedByKey.has(key)) continue;
+    detailedByKey.set(key, project);
+  }
+
+  const workedHours = Number(report?.totalHours || 0);
+  const leavesHours = Number(leaves?.totalHours || 0);
+  const leavesDays = Number(leaves?.totalDays || 0);
+  const benchProject = projectByKey.get(BENCH_SCOPE_KEY) || null;
+  const benchHours = Number(benchProject?.hours || 0);
+  const benchRate = workedHours > 0 ? (benchHours / workedHours) * 100 : 0;
+  const utilizationRate = Math.max(0, 100 - benchRate);
+  const benchDetails = detailedByKey.get(BENCH_SCOPE_KEY) || null;
+  const roemoDetails = detailedByKey.get(ROEMO_SCOPE_KEY) || null;
+  const leavesDetails = buildLeavesDetailsForExport(leaves);
+  const exportIdentity = buildExportIdentity(report, leaves, requestedEmail);
+  const benchNarrative = buildNarrativeForProject(benchDetails, BENCH_SCOPE_KEY, 'bench');
+  const roemoNarrative = buildNarrativeForProject(roemoDetails, ROEMO_SCOPE_KEY, ROEMO_SCOPE_KEY);
+  const analysisInfo = buildAnalysisInfo(report, leaves, requestedEmail);
+  const summary = {
+    workedHours,
+    leavesHours,
+    leavesDays,
+    benchHours,
+    benchRate,
+    utilizationRate,
+  };
+  const progressCircles = buildProgressCircles(summary);
+
+  return {
+    report,
+    leaves,
+    summary,
+    benchDetails,
+    roemoDetails,
+    leavesDetails,
+    analysisInfo,
+    progressCircles,
+    exportIdentity,
+    benchNarrative,
+    roemoNarrative,
+  };
+}
+
+async function writeHeadlessXlsx(filePath, context) {
+  const excelModule = await import('exceljs');
+  const ExcelJS = excelModule.default || excelModule;
+  if (!ExcelJS?.Workbook) {
+    throw new Error("Le module d'export Excel n'a pas pu être chargé correctement.");
+  }
+
+  const { report, leaves, summary, benchDetails, roemoDetails, leavesDetails } = context;
+  const benchCommentSummary = benchDetails?.commentSummary || null;
+  const roemoCommentSummary = roemoDetails?.commentSummary || null;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Worklog CSE';
+  workbook.created = new Date();
+
+  function addWorksheet(sheetName, rows) {
+    const sheet = workbook.addWorksheet(sheetName);
+    const safeRows = rows.length ? rows : [{ Information: 'Aucune donnée' }];
+    const headers = Object.keys(safeRows[0]);
+
+    sheet.columns = headers.map((header) => ({
+      header,
+      key: header,
+      width: Math.max(14, Math.min(48, header.length + 4)),
+    }));
+
+    safeRows.forEach((row) => {
+      sheet.addRow(row);
+    });
+
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FF2E4A2E' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFEAF4DC' },
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  }
+
+  function projectSheetName(projectKey, suffix) {
+    const normalizedKey = safeText(projectKey || 'PROJECT').toUpperCase() || 'PROJECT';
+    const normalizedSuffix = safeText(suffix || '');
+    const candidate = normalizedSuffix ? `${normalizedKey}_${normalizedSuffix}` : normalizedKey;
+    return candidate.slice(0, 31);
+  }
+
+  function paintCard(sheet, startCol, startRow, title, value, subtitle, colorArgb) {
+    const endCol = startCol + 2;
+    const endRow = startRow + 3;
+    sheet.mergeCells(startRow, startCol, startRow, endCol);
+    sheet.mergeCells(startRow + 1, startCol, startRow + 2, endCol);
+    sheet.mergeCells(startRow + 3, startCol, endRow, endCol);
+
+    const titleCell = sheet.getCell(startRow, startCol);
+    titleCell.value = title;
+    titleCell.font = { bold: true, color: { argb: 'FF31462B' }, size: 11 };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    const valueCell = sheet.getCell(startRow + 1, startCol);
+    valueCell.value = value;
+    valueCell.font = { bold: true, color: { argb: 'FF2B3F24' }, size: 16 };
+    valueCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    const subtitleCell = sheet.getCell(startRow + 3, startCol);
+    subtitleCell.value = subtitle;
+    subtitleCell.font = { color: { argb: 'FF4F6949' }, size: 10 };
+    subtitleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+    for (let row = startRow; row <= endRow; row += 1) {
+      for (let col = startCol; col <= endCol; col += 1) {
+        const cell = sheet.getCell(row, col);
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: colorArgb },
+        };
+        cell.border = {
+          top: { style: 'thin', color: { argb: '66A2B88B' } },
+          left: { style: 'thin', color: { argb: '66A2B88B' } },
+          bottom: { style: 'thin', color: { argb: '66A2B88B' } },
+          right: { style: 'thin', color: { argb: '66A2B88B' } },
+        };
+      }
+    }
+  }
+
+  const analysedUser = context.exportIdentity.label || 'Mon compte';
+  const generatedAt = new Date().toLocaleString('fr-FR');
+  const summarySheet = workbook.addWorksheet('Synthese_UI');
+  summarySheet.columns = [
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+  ];
+  summarySheet.mergeCells('A1:F1');
+  summarySheet.getCell('A1').value = 'Worklog CSE - Synthese 2025';
+  summarySheet.getCell('A1').font = { bold: true, size: 18, color: { argb: 'FF42583A' } };
+  summarySheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+  summarySheet.getCell('A1').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF5FAEC' },
+  };
+
+  summarySheet.mergeCells('A2:C2');
+  summarySheet.getCell('A2').value = `Utilisateur: ${analysedUser}`;
+  summarySheet.getCell('A2').font = { bold: true, color: { argb: 'FF35532F' } };
+  summarySheet.getCell('A2').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF1F8E6' },
+  };
+  summarySheet.mergeCells('D2:F2');
+  summarySheet.getCell('D2').value = `Export: ${generatedAt}`;
+  summarySheet.getCell('D2').font = { bold: true, color: { argb: 'FF35532F' } };
+  summarySheet.getCell('D2').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF1F8E6' },
+  };
+
+  paintCard(
+    summarySheet,
+    1,
+    4,
+    'Heures travaillees',
+    `${formatNumberForExport(summary.workedHours)} h`,
+    'Total des heures de travail en 2025',
+    'FFF7FDF0'
+  );
+  paintCard(
+    summarySheet,
+    4,
+    4,
+    'Conges / absences',
+    `${formatNumberForExport(summary.leavesHours)} h`,
+    `${formatNumberForExport(summary.leavesDays)} jours`,
+    'FFFFF8EE'
+  );
+  paintCard(
+    summarySheet,
+    1,
+    9,
+    'Taux bench',
+    `${formatPercentForExport(summary.benchRate)}`,
+    `${formatNumberForExport(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`,
+    'FFF9F2EC'
+  );
+  paintCard(
+    summarySheet,
+    4,
+    9,
+    "Taux d'utilisation",
+    `${formatPercentForExport(summary.utilizationRate)}`,
+    'Formule: 100% - taux bench',
+    'FFEFF7F0'
+  );
+
+  summarySheet.mergeCells('A14:F14');
+  summarySheet.getCell('A14').value = `Narratif bench: ${context.benchNarrative}`;
+  summarySheet.getCell('A14').alignment = { wrapText: true, vertical: 'top' };
+  summarySheet.getCell('A14').font = { color: { argb: 'FF4B6343' }, size: 10 };
+  summarySheet.getCell('A14').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF8FBF4' },
+  };
+  summarySheet.getRow(1).height = 28;
+  summarySheet.getRow(14).height = 36;
+  summarySheet.views = [{ state: 'frozen', ySplit: 2 }];
+
+  const projectRows = (report?.projects || []).map((project) => ({
+    Projet: project.projectKey,
+    Nom: project.projectName,
+    Heures: Number(project.hours || 0),
+  }));
+  projectRows.push({
+    Projet: 'TOTAL',
+    Nom: 'Activités 2025',
+    Heures: Number(report?.totalHours || 0),
+  });
+  addWorksheet('Projets_2025', projectRows);
+
+  addWorksheet(
+    'Bench_Types',
+    (benchDetails?.issueTypeTotals || []).map((entry) => ({
+      Type: entry.issueType,
+      Heures: Number(entry.hours || 0),
+    }))
+  );
+  addWorksheet(
+    'Bench_Tickets',
+    (benchDetails?.issues || []).map((issue) => ({
+      Ticket: issue.issueKey,
+      Type: issue.issueType,
+      Parent: issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '',
+      Résumé: issue.summary,
+      Heures: Number(issue.hours || 0),
+    }))
+  );
+  addWorksheet(
+    'Bench_Commentaires_Themes',
+    (benchCommentSummary?.themes || []).map((theme) => ({
+      Thème: theme.label,
+      Heures: Number(theme.hours || 0),
+      Saisies: Number(theme.occurrences || 0),
+    }))
+  );
+  addWorksheet(
+    'Bench_Commentaires_Exemples',
+    (benchCommentSummary?.highlights || []).map((entry) => ({
+      Ticket: entry.issueKey,
+      Heures: Number(entry.hours || 0),
+      Commentaire: entry.comment,
+    }))
+  );
+
+  if (HAS_DISTINCT_ROEMO_SCOPE) {
+    addWorksheet(
+      projectSheetName(ROEMO_SCOPE_KEY, 'Types'),
+      (roemoDetails?.issueTypeTotals || []).map((entry) => ({
+        Type: entry.issueType,
+        Heures: Number(entry.hours || 0),
+      }))
+    );
+    addWorksheet(
+      projectSheetName(ROEMO_SCOPE_KEY, 'Tickets'),
+      (roemoDetails?.issues || []).map((issue) => ({
+        Ticket: issue.issueKey,
+        Type: issue.issueType,
+        Parent: issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '',
+        Résumé: issue.summary,
+        Heures: Number(issue.hours || 0),
+      }))
+    );
+    addWorksheet(
+      projectSheetName(ROEMO_SCOPE_KEY, 'Commentaires_Themes'),
+      (roemoCommentSummary?.themes || []).map((theme) => ({
+        Thème: theme.label,
+        Heures: Number(theme.hours || 0),
+        Saisies: Number(theme.occurrences || 0),
+      }))
+    );
+    addWorksheet(
+      projectSheetName(ROEMO_SCOPE_KEY, 'Commentaires_Exemples'),
+      (roemoCommentSummary?.highlights || []).map((entry) => ({
+        Ticket: entry.issueKey,
+        Heures: Number(entry.hours || 0),
+        Commentaire: entry.comment,
+      }))
+    );
+  }
+
+  addWorksheet(
+    'Conges_Types',
+    (leavesDetails.issueTypeTotals || []).map((entry) => ({
+      Type: entry.issueType,
+      Heures: Number(entry.hours || 0),
+    }))
+  );
+  addWorksheet(
+    'Conges_Tickets',
+    (leaves?.issues || []).map((issue) => ({
+      Ticket: issue.issueKey,
+      Type: issue.issueType,
+      Statut: issue.status,
+      Parent: issue.parentKey || '',
+      Résumé: issue.summary,
+      Heures: Number(issue.hours || 0),
+      Jours: Number(issue.days || 0),
+    }))
+  );
+
+  await workbook.xlsx.writeFile(filePath);
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildHeadlessPdfHtml(context, docTitle) {
+  const { report, leaves, summary, benchDetails, roemoDetails, leavesDetails, analysisInfo, progressCircles } = context;
+  const benchCommentSummary = benchDetails?.commentSummary || null;
+  const roemoCommentSummary = roemoDetails?.commentSummary || null;
+  const generatedAt = new Date().toLocaleString('fr-FR');
+  const analysedUser = context.exportIdentity.label || 'Mon compte';
+  const avatarLabel = analysisInfo?.displayName || analysisInfo?.resolvedEmail || analysedUser;
+  const avatarInitials = getInitials(avatarLabel);
+  const avatarHtml = analysisInfo?.avatarUrl
+    ? `<img class="account-avatar" src="${escapeHtml(analysisInfo.avatarUrl)}" alt="${escapeHtml(avatarLabel)}" />`
+    : `<span class="account-avatar fallback" aria-hidden="true">${escapeHtml(avatarInitials)}</span>`;
+  const accountBadgeClass = analysisInfo?.fallback ? 'warn' : analysisInfo?.delegated ? 'info' : 'ok';
+  const circlesHtml = (progressCircles || []).map((item) => {
+    const safeValue = clampPercent(item.value);
+    return `<article class="progress-card">
+      <div class="progress-circle tone-${escapeHtml(item.tone)}" style="--pct: ${safeValue}%">
+        <span>${escapeHtml(formatPercentForExport(safeValue))}</span>
+      </div>
+      <h4>${escapeHtml(item.title)}</h4>
+      <small>${escapeHtml(item.subtitle)}</small>
+    </article>`;
+  }).join('');
+
+  const toRows = (items, headers, rowBuilder) => {
+    if (!Array.isArray(items) || !items.length) {
+      return '<p class="empty">Aucune donnée.</p>';
+    }
+    const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+    const body = items.map((entry) => {
+      const cols = rowBuilder(entry).map((cell) => `<td>${escapeHtml(cell)}</td>`).join('');
+      return `<tr>${cols}</tr>`;
+    }).join('');
+    return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  };
+
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(docTitle)}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f7f5e9;
+      --panel: #ffffff;
+      --line: #d4dfc6;
+      --text: #33452f;
+      --muted: #5f7959;
+      --title: #4b603f;
+      --chip: #eef6e4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Nunito", "Avenir Next", "Trebuchet MS", sans-serif;
+      background: linear-gradient(180deg, #f7f5e9 0%, #fde8c8 45%, #dce9c4 100%);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .page {
+      width: 100%;
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .panel {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      color: var(--title);
+      font-size: 32px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      color: var(--title);
+      font-size: 20px;
+    }
+    h3 {
+      margin: 12px 0 8px;
+      color: #4f6341;
+      font-size: 15px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .meta span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--chip);
+      border: 1px solid #cad8b6;
+      font-size: 12px;
+      color: #476042;
+    }
+    .account-badge {
+      display: grid;
+      gap: 2px;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(107, 141, 89, 0.35);
+      background: rgba(255, 255, 255, 0.75);
+    }
+    .account-badge strong {
+      color: #2d4b2c;
+    }
+    .account-badge-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .account-badge-meta {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .account-badge-meta small {
+      color: #567255;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    .account-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid rgba(107, 141, 89, 0.35);
+      object-fit: cover;
+      background: rgba(255, 255, 255, 0.9);
+      flex: 0 0 auto;
+    }
+    .account-avatar.fallback {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #466045;
+      background: linear-gradient(145deg, rgba(232, 245, 216, 0.96), rgba(248, 255, 241, 0.96));
+    }
+    .account-badge span {
+      color: #50694a;
+      font-size: 13px;
+    }
+    .account-badge.warn {
+      border-color: rgba(195, 143, 61, 0.6);
+      background: rgba(255, 248, 231, 0.86);
+    }
+    .account-badge.warn strong {
+      color: #6b4a1f;
+    }
+    .account-badge.info {
+      border-color: rgba(93, 142, 154, 0.55);
+      background: rgba(239, 249, 250, 0.88);
+    }
+    .progress-dashboard {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .progress-card {
+      border: 1px solid rgba(145, 170, 118, 0.24);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.66);
+      display: grid;
+      justify-items: center;
+      text-align: center;
+      gap: 6px;
+    }
+    .progress-card h4 {
+      margin: 0;
+      font-size: 14px;
+      color: #4f6341;
+    }
+    .progress-card small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .progress-circle {
+      --pct: 0%;
+      width: 96px;
+      height: 96px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      background: conic-gradient(var(--ring-color, #7fa567) var(--pct), rgba(220, 229, 205, 0.8) var(--pct));
+    }
+    .progress-circle::before {
+      content: '';
+      position: absolute;
+      inset: 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(141, 167, 114, 0.22);
+    }
+    .progress-circle span {
+      position: relative;
+      z-index: 1;
+      font-weight: 700;
+      color: #4f6642;
+      font-size: 14px;
+    }
+    .progress-circle.tone-leaf {
+      --ring-color: #7fa567;
+    }
+    .progress-circle.tone-sun {
+      --ring-color: #dda262;
+    }
+    .progress-circle.tone-sky {
+      --ring-color: #8fb6ba;
+    }
+    .progress-circle.tone-rose {
+      --ring-color: #d78e83;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .card {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fbfdf7;
+    }
+    .card strong {
+      display: block;
+      font-size: 12px;
+      color: #5d7756;
+    }
+    .card p {
+      margin: 6px 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #42593a;
+    }
+    .card small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .narrative {
+      margin-top: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid #d6e1c9;
+      background: #f8fbf4;
+      color: #4f6949;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 11px;
+      background: #fff;
+    }
+    th, td {
+      border: 1px solid #d8e2cc;
+      padding: 6px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef6e4;
+      color: #445a3d;
+      font-weight: 700;
+    }
+    .empty {
+      margin: 0;
+      color: #6d8169;
+      font-size: 12px;
+      font-style: italic;
+    }
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    @media print {
+      body { background: #fff; }
+      .page { max-width: none; padding: 8mm; }
+      .panel { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="panel">
+      <h1>Worklog CSE - Export PDF 2025</h1>
+      <div class="meta">
+        <span>Utilisateur: ${escapeHtml(analysedUser)}</span>
+        <span>Date export: ${escapeHtml(generatedAt)}</span>
+        <span>Scope bench: ${escapeHtml(BENCH_SCOPE_KEY)}</span>
+        ${HAS_DISTINCT_ROEMO_SCOPE ? `<span>Scope projet: ${escapeHtml(ROEMO_SCOPE_KEY)}</span>` : ''}
+        <span>Scope congés: ${escapeHtml(LEAVE_SCOPE_LABEL)}</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Résumé</h2>
+      <div class="account-badge ${accountBadgeClass}">
+        <div class="account-badge-head">
+          ${avatarHtml}
+          <div class="account-badge-meta">
+            <strong>Compte analysé : ${escapeHtml(analysisInfo?.resolvedEmail || analysedUser)}</strong>
+            ${analysisInfo?.displayName ? `<small>${escapeHtml(analysisInfo.displayName)}</small>` : ''}
+          </div>
+        </div>
+        <span>${escapeHtml(analysisInfo?.message || 'Analyse de vos données.')}</span>
+      </div>
+      <div class="progress-dashboard">
+        ${circlesHtml}
+      </div>
+      <div class="cards">
+        <article class="card">
+          <strong>Heures travaillées</strong>
+          <p>${escapeHtml(`${formatNumberForExport(summary.workedHours)} h`)}</p>
+          <small>Total des heures de travail en 2025.</small>
+        </article>
+        <article class="card">
+          <strong>Congés / absences</strong>
+          <p>${escapeHtml(`${formatNumberForExport(summary.leavesHours)} h`)}</p>
+          <small>${escapeHtml(`${formatNumberForExport(summary.leavesDays)} jours`)}</small>
+        </article>
+        <article class="card">
+          <strong>Taux bench</strong>
+          <p>${escapeHtml(formatPercentForExport(summary.benchRate))}</p>
+          <small>${escapeHtml(`${formatNumberForExport(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
+        </article>
+        <article class="card">
+          <strong>Taux d'utilisation</strong>
+          <p>${escapeHtml(formatPercentForExport(summary.utilizationRate))}</p>
+          <small>Formule: 100 % - taux bench.</small>
+        </article>
+      </div>
+      <p class="narrative">${escapeHtml(context.benchNarrative)}</p>
+    </section>
+
+    <section class="panel">
+      <h2>Heures par projet</h2>
+      ${toRows(
+        [...(report.projects || []), { projectKey: 'TOTAL', projectName: 'Activités 2025', hours: Number(report.totalHours || 0) }],
+        ['Projet', 'Nom', 'Heures'],
+        (project) => [project.projectKey, project.projectName, formatNumberForExport(project.hours)]
+      )}
+    </section>
+
+    <section class="panel">
+      <h2>Détail bench (${escapeHtml(BENCH_SCOPE_KEY)})</h2>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            benchDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumberForExport(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches bench</h3>
+          ${toRows(
+            benchDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              formatNumberForExport(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets bench</h3>
+          ${toRows(
+            benchDetails?.issues || [],
+            ['Ticket', 'Type', 'Parent', 'Résumé', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              issue.summary,
+              formatNumberForExport(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires bench - thèmes</h3>
+          ${toRows(
+            benchCommentSummary?.themes || [],
+            ['Thème', 'Heures', 'Saisies'],
+            (theme) => [theme.label, formatNumberForExport(theme.hours), String(theme.occurrences)]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires bench - exemples</h3>
+          ${toRows(
+            benchCommentSummary?.highlights || [],
+            ['Ticket', 'Heures', 'Commentaire'],
+            (entry) => [entry.issueKey, formatNumberForExport(entry.hours), entry.comment]
+          )}
+        </div>
+      </div>
+    </section>
+
+    ${HAS_DISTINCT_ROEMO_SCOPE ? `
+    <section class="panel">
+      <h2>Détail projet (${escapeHtml(ROEMO_SCOPE_KEY)})</h2>
+      <p class="narrative">${escapeHtml(context.roemoNarrative)}</p>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            roemoDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumberForExport(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches ${escapeHtml(ROEMO_SCOPE_KEY)}</h3>
+          ${toRows(
+            roemoDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              formatNumberForExport(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets ${escapeHtml(ROEMO_SCOPE_KEY)}</h3>
+          ${toRows(
+            roemoDetails?.issues || [],
+            ['Ticket', 'Type', 'Parent', 'Résumé', 'Heures'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey ? `${issue.parentKey} - ${issue.parentSummary}` : '-',
+              issue.summary,
+              formatNumberForExport(issue.hours),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires ${escapeHtml(ROEMO_SCOPE_KEY)} - thèmes</h3>
+          ${toRows(
+            roemoCommentSummary?.themes || [],
+            ['Thème', 'Heures', 'Saisies'],
+            (theme) => [theme.label, formatNumberForExport(theme.hours), String(theme.occurrences)]
+          )}
+        </div>
+        <div>
+          <h3>Commentaires ${escapeHtml(ROEMO_SCOPE_KEY)} - exemples</h3>
+          ${toRows(
+            roemoCommentSummary?.highlights || [],
+            ['Ticket', 'Heures', 'Commentaire'],
+            (entry) => [entry.issueKey, formatNumberForExport(entry.hours), entry.comment]
+          )}
+        </div>
+      </div>
+    </section>
+    ` : ''}
+
+    <section class="panel">
+      <h2>Congés et absences (${escapeHtml(LEAVE_SCOPE_LABEL)})</h2>
+      <div class="section-grid">
+        <div>
+          <h3>Répartition par type</h3>
+          ${toRows(
+            leavesDetails?.issueTypeTotals || [],
+            ["Type d'issue", 'Heures'],
+            (entry) => [entry.issueType, formatNumberForExport(entry.hours)]
+          )}
+        </div>
+        <div>
+          <h3>Sous-tâches congés</h3>
+          ${toRows(
+            leavesDetails?.subtasks || [],
+            ['Ticket', 'Type', 'Parent', 'Heures', 'Jours'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.parentKey || '-',
+              formatNumberForExport(issue.hours),
+              formatNumberForExport(issue.days),
+            ]
+          )}
+        </div>
+        <div>
+          <h3>Tous les tickets congés</h3>
+          ${toRows(
+            leaves?.issues || [],
+            ['Ticket', 'Type', 'Statut', 'Parent', 'Résumé', 'Heures', 'Jours'],
+            (issue) => [
+              issue.issueKey,
+              issue.issueType,
+              issue.status,
+              issue.parentKey || '-',
+              issue.summary,
+              formatNumberForExport(issue.hours),
+              formatNumberForExport(issue.days),
+            ]
+          )}
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>`;
+}
+
+async function renderPdfWithChrome(filePath, html) {
+  const chromeBinary = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (!(await fileExists(chromeBinary))) {
+    throw new Error('Google Chrome est requis pour l’export PDF headless (binaire introuvable).');
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'worklog-cse-pdf-'));
+  const htmlPath = path.join(tempDir, 'report.html');
+  const profileDir = path.join(tempDir, 'chrome-profile');
+  await fs.writeFile(htmlPath, html, 'utf8');
+
+  const baseArgs = [
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--allow-file-access-from-files',
+    '--print-to-pdf-no-header',
+    `--user-data-dir=${profileDir}`,
+    `--print-to-pdf=${filePath}`,
+    pathToFileURL(htmlPath).href,
+  ];
+
+  let result = await runCommand(chromeBinary, ['--headless=new', ...baseArgs], {
+    timeoutMs: 180000,
+  });
+  if (result.code !== 0) {
+    result = await runCommand(chromeBinary, ['--headless', ...baseArgs], {
+      timeoutMs: 180000,
+    });
+  }
+
+  const pdfOk = (await fileExists(filePath)) && (await fs.stat(filePath)).size > 0;
+  await fs.rm(tempDir, { recursive: true, force: true });
+
+  if (!pdfOk) {
+    const details = (result.stderr || result.stdout || '').trim().split('\n').slice(-4).join(' | ');
+    throw new Error(`Échec de la génération PDF headless via Chrome.${details ? ` Détail: ${details}` : ''}`);
+  }
+
+  if (result.code !== 0) {
+    const details = (result.stderr || result.stdout || '').trim().split('\n').slice(-2).join(' | ');
+    if (details) {
+      console.warn(`PDF headless: Chrome a renvoyé un code non nul mais le fichier a bien été généré. ${details}`);
+    }
+  }
+}
+
+async function writeHeadlessPdf(filePath, context) {
+  const html = buildHeadlessPdfHtml(context, path.basename(filePath));
+  await renderPdfWithChrome(filePath, html);
+}
+
+async function runHeadlessExports(options) {
+  const userEmail = safeText(options.userEmail || '');
+  const token = await getTokenFromRequestOrConfig(options.token);
+  if (!token) {
+    throw new Error("Mode headless: aucune clé d'accès trouvée. Utilisez -t/--token ou configurez ~/.codex/config.toml.");
+  }
+
+  const shouldExportXlsx = Boolean(options.exportXlsx || (!options.exportXlsx && !options.exportPdf));
+  const shouldExportPdf = Boolean(options.exportPdf || (!options.exportXlsx && !options.exportPdf));
+  const outputDir = path.resolve(process.cwd(), safeText(options.outputDir || process.cwd()));
+  await fs.mkdir(outputDir, { recursive: true });
+
+  console.log('Headless mode: collecte des données 2025...');
+  const [report, leaves] = await Promise.all([
+    collectWorkedHours2025(token, [BENCH_SCOPE_KEY, ROEMO_SCOPE_KEY], userEmail),
+    collectAnnualLeaves2025(token, LEAVE_ANCHOR_ISSUE_KEY, userEmail),
+  ]);
+  const context = buildExportContext(report, leaves, userEmail);
+  const safeDate = new Date().toISOString().slice(0, 10);
+  const baseName = `worklog-cse-${context.exportIdentity.filePart}-${safeDate}`;
+  const generatedFiles = [];
+
+  if (shouldExportXlsx) {
+    const xlsxPath = path.join(outputDir, `${baseName}.xlsx`);
+    await writeHeadlessXlsx(xlsxPath, context);
+    generatedFiles.push(xlsxPath);
+  }
+
+  if (shouldExportPdf) {
+    const pdfPath = path.join(outputDir, `${baseName}.pdf`);
+    await writeHeadlessPdf(pdfPath, context);
+    generatedFiles.push(pdfPath);
+  }
+
+  console.log('Headless mode: exports terminés.');
+  for (const filePath of generatedFiles) {
+    console.log(`- ${filePath}`);
+  }
+}
+
 app.get('/api/health', (_, res) => {
   res.json({ ok: true, port: API_PORT });
 });
@@ -1809,7 +2994,15 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
+async function main() {
+  if (CLI_LAUNCH_OPTIONS.headless) {
+    await runHeadlessExports(CLI_LAUNCH_OPTIONS);
+    return;
+  }
+  await startServer();
+}
+
+main().catch((err) => {
   console.error(`Startup error: ${err.message}`);
   process.exit(1);
 });

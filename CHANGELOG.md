@@ -4,6 +4,21 @@ Tous les changements notables de ce projet sont listés ici.
 
 ## [Unreleased]
 
+### Added
+
+- Mode headless CLI: export direct sans UI (`--headless`) avec formats `.xlsx` et `.pdf`.
+- Options CLI d'export headless: `--xls/--xlsx`, `--pdf`, `-o/--output-dir`.
+
+### Changed
+
+- Export Excel headless aligné sur le rendu UI (`Synthese_UI`, cartes visuelles, mêmes onglets détaillés).
+- Export PDF headless aligné sur le rendu UI (avatar du compte analysé + cercles de progression).
+- Génération PDF headless via Google Chrome en mode headless, à partir du même template HTML/CSS que l'export navigateur.
+
+### Fixed
+
+- Statut de sortie CLI headless: ne retourne plus en erreur si Chrome renvoie un code non nul mais que le PDF est bien généré.
+
 ## [1.17.3] - 2026-03-13 15:34 CET
 
 ### Added
