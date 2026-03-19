@@ -2191,6 +2191,22 @@ function buildProgressCircles(summary) {
   return circles;
 }
 
+function buildTopProjectStats(report, totalHours, limit = 5) {
+  return (report?.projects || [])
+    .map((project) => ({
+      projectKey: safeText(project?.projectKey || '-'),
+      projectName: safeText(project?.projectName || '-'),
+      hours: Number(project?.hours || 0),
+    }))
+    .filter((project) => project.hours > 0)
+    .sort((left, right) => right.hours - left.hours)
+    .slice(0, limit)
+    .map((project) => ({
+      ...project,
+      share: totalHours > 0 ? (project.hours / totalHours) * 100 : 0,
+    }));
+}
+
 function buildExportContext(report, leaves, requestedEmail) {
   const projectByKey = new Map();
   const detailedByKey = new Map();
@@ -2231,6 +2247,7 @@ function buildExportContext(report, leaves, requestedEmail) {
     utilizationRate,
   };
   const progressCircles = buildProgressCircles(summary);
+  const topProjects = buildTopProjectStats(report, workedHours);
 
   return {
     report,
@@ -2242,6 +2259,7 @@ function buildExportContext(report, leaves, requestedEmail) {
     leavesDetails,
     analysisInfo,
     progressCircles,
+    topProjects,
     exportIdentity,
     benchNarrative,
     roemoNarrative,
@@ -2538,7 +2556,7 @@ function escapeHtml(value) {
 }
 
 function buildHeadlessPdfHtml(context, docTitle) {
-  const { report, leaves, summary, benchDetails, roemoDetails, showRoemoSection, leavesDetails, analysisInfo, progressCircles } = context;
+  const { report, leaves, summary, benchDetails, roemoDetails, showRoemoSection, leavesDetails, analysisInfo, progressCircles, topProjects } = context;
   const benchCommentSummary = benchDetails?.commentSummary || null;
   const roemoCommentSummary = roemoDetails?.commentSummary || null;
   const generatedAt = new Date().toLocaleString('fr-FR');
@@ -2559,6 +2577,51 @@ function buildHeadlessPdfHtml(context, docTitle) {
       <small>${escapeHtml(item.subtitle)}</small>
     </article>`;
   }).join('');
+  const statPills = [
+    {
+      label: 'Tickets analysés',
+      value: Number(report?.issueCount || 0).toLocaleString('fr-FR'),
+      note: 'périmètre 2025',
+    },
+    {
+      label: 'Saisies retenues',
+      value: Number(report?.worklogCount || 0).toLocaleString('fr-FR'),
+      note: 'après filtrage',
+    },
+    {
+      label: 'Sous-tâches bench',
+      value: Number(benchDetails?.subtaskCount || 0).toLocaleString('fr-FR'),
+      note: `${formatNumberForExport(benchDetails?.subtaskHours || 0)} h`,
+    },
+    {
+      label: 'Sous-tâches congés',
+      value: Number(leavesDetails?.subtaskCount || 0).toLocaleString('fr-FR'),
+      note: `${formatNumberForExport(leavesDetails?.subtaskHours || 0)} h`,
+    },
+  ];
+  const statPillsHtml = statPills.map((item) => (
+    `<article class="stat-pill">
+      <strong>${escapeHtml(item.label)}</strong>
+      <p>${escapeHtml(item.value)}</p>
+      <small>${escapeHtml(item.note)}</small>
+    </article>`
+  )).join('');
+  const topProjectsHtml = Array.isArray(topProjects) && topProjects.length
+    ? topProjects.map((project) => {
+      const share = clampPercent(project.share);
+      return `<article class="project-share-card">
+        <div class="project-share-head">
+          <strong>${escapeHtml(project.projectKey)}</strong>
+          <span>${escapeHtml(formatPercentForExport(share))}</span>
+        </div>
+        <p>${escapeHtml(project.projectName)}</p>
+        <div class="project-share-track" role="presentation">
+          <span style="width:${share}%"></span>
+        </div>
+        <small>${escapeHtml(`${formatNumberForExport(project.hours)} h`)}</small>
+      </article>`;
+    }).join('')
+    : '<p class="empty">Aucun projet avec temps saisi.</p>';
 
   const toRows = (items, headers, rowBuilder) => {
     if (!Array.isArray(items) || !items.length) {
@@ -2705,6 +2768,24 @@ function buildHeadlessPdfHtml(context, docTitle) {
       gap: 12px;
       margin-bottom: 12px;
     }
+    .summary-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 12px;
+    }
+    .summary-main {
+      min-width: 0;
+    }
+    .summary-aside {
+      min-width: 0;
+      border: 1px solid rgba(145, 170, 118, 0.22);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(250, 253, 246, 0.85);
+    }
+    .summary-aside h3 {
+      margin-top: 0;
+    }
     .progress-card {
       border: 1px solid rgba(145, 170, 118, 0.24);
       border-radius: 12px;
@@ -2761,9 +2842,36 @@ function buildHeadlessPdfHtml(context, docTitle) {
     .progress-circle.tone-rose {
       --ring-color: #d78e83;
     }
-    .cards {
+    .stat-strip {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+    .stat-pill {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fbfdf7;
+    }
+    .stat-pill strong {
+      display: block;
+      font-size: 12px;
+      color: #5d7756;
+    }
+    .stat-pill p {
+      margin: 6px 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #42593a;
+    }
+    .stat-pill small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     .card {
@@ -2784,6 +2892,52 @@ function buildHeadlessPdfHtml(context, docTitle) {
       color: #42593a;
     }
     .card small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .project-share-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .project-share-card {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 9px 10px;
+      background: #fff;
+      display: grid;
+      gap: 4px;
+    }
+    .project-share-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      color: #4f6341;
+      font-size: 12px;
+    }
+    .project-share-head strong {
+      font-size: 13px;
+      color: #3f5637;
+    }
+    .project-share-card p {
+      margin: 0;
+      font-size: 12px;
+      color: #566c50;
+    }
+    .project-share-track {
+      height: 7px;
+      border-radius: 999px;
+      background: #e9f0de;
+      overflow: hidden;
+    }
+    .project-share-track span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #89b36e, #6e9f8a);
+    }
+    .project-share-card small {
       color: #6c8467;
       font-size: 11px;
     }
@@ -2814,6 +2968,9 @@ function buildHeadlessPdfHtml(context, docTitle) {
       color: #445a3d;
       font-weight: 700;
     }
+    tbody tr:nth-child(even) td {
+      background: #fafdf6;
+    }
     .empty {
       margin: 0;
       color: #6d8169;
@@ -2834,6 +2991,12 @@ function buildHeadlessPdfHtml(context, docTitle) {
       body { background: #fff; }
       .page { max-width: none; padding: 8mm; }
       .panel { break-inside: avoid; }
+      .summary-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .stat-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
   </style>
 </head>
@@ -2862,30 +3025,43 @@ function buildHeadlessPdfHtml(context, docTitle) {
         </div>
         <span>${escapeHtml(analysisInfo?.message || 'Analyse de vos données.')}</span>
       </div>
-      <div class="progress-dashboard">
-        ${circlesHtml}
+      <div class="stat-strip">
+        ${statPillsHtml}
       </div>
-      <div class="cards">
-        <article class="card">
-          <strong>Heures travaillées</strong>
-          <p>${escapeHtml(`${formatNumberForExport(summary.workedHours)} h`)}</p>
-          <small>Total des heures de travail en 2025.</small>
-        </article>
-        <article class="card">
-          <strong>Congés / absences</strong>
-          <p>${escapeHtml(`${formatNumberForExport(summary.leavesHours)} h`)}</p>
-          <small>${escapeHtml(`${formatNumberForExport(summary.leavesDays)} jours`)}</small>
-        </article>
-        <article class="card">
-          <strong>Taux bench</strong>
-          <p>${escapeHtml(formatPercentForExport(summary.benchRate))}</p>
-          <small>${escapeHtml(`${formatNumberForExport(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
-        </article>
-        <article class="card">
-          <strong>Taux d'utilisation</strong>
-          <p>${escapeHtml(formatPercentForExport(summary.utilizationRate))}</p>
-          <small>Formule: 100 % - taux bench.</small>
-        </article>
+      <div class="summary-layout">
+        <div class="summary-main">
+          <div class="progress-dashboard">
+            ${circlesHtml}
+          </div>
+          <div class="cards">
+            <article class="card">
+              <strong>Heures travaillées</strong>
+              <p>${escapeHtml(`${formatNumberForExport(summary.workedHours)} h`)}</p>
+              <small>Total des heures de travail en 2025.</small>
+            </article>
+            <article class="card">
+              <strong>Congés / absences</strong>
+              <p>${escapeHtml(`${formatNumberForExport(summary.leavesHours)} h`)}</p>
+              <small>${escapeHtml(`${formatNumberForExport(summary.leavesDays)} jours`)}</small>
+            </article>
+            <article class="card">
+              <strong>Taux bench</strong>
+              <p>${escapeHtml(formatPercentForExport(summary.benchRate))}</p>
+              <small>${escapeHtml(`${formatNumberForExport(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
+            </article>
+            <article class="card">
+              <strong>Taux d'utilisation</strong>
+              <p>${escapeHtml(formatPercentForExport(summary.utilizationRate))}</p>
+              <small>Formule: 100 % - taux bench.</small>
+            </article>
+          </div>
+        </div>
+        <aside class="summary-aside">
+          <h3>Top projets (part des heures)</h3>
+          <div class="project-share-grid">
+            ${topProjectsHtml}
+          </div>
+        </aside>
       </div>
       <p class="narrative">${escapeHtml(context.benchNarrative)}</p>
     </section>

@@ -1674,6 +1674,80 @@ export default function App() {
       const safeDate = new Date().toISOString().slice(0, 10);
       const docTitle = `worklog-cse-${exportIdentity.filePart}-${safeDate}.pdf`;
       const analysedUser = exportIdentity.label || 'Mon compte';
+      const avatarLabel = analysisInfo?.displayName || analysisInfo?.resolvedEmail || analysedUser;
+      const avatarInitials = getInitials(avatarLabel);
+      const avatarHtml = analysisInfo?.avatarUrl
+        ? `<img class="account-avatar" src="${escapeHtml(analysisInfo.avatarUrl)}" alt="${escapeHtml(avatarLabel)}" />`
+        : `<span class="account-avatar fallback" aria-hidden="true">${escapeHtml(avatarInitials)}</span>`;
+      const accountBadgeClass = analysisInfo?.fallback ? 'warn' : analysisInfo?.delegated ? 'info' : 'ok';
+      const circlesHtml = (progressCircles || []).map((item) => {
+        const safeValue = clampPercent(item.value);
+        return `<article class="progress-card">
+          <div class="progress-circle tone-${escapeHtml(item.tone)}" style="--pct: ${safeValue}%">
+            <span>${escapeHtml(formatPercent(safeValue))}</span>
+          </div>
+          <h4>${escapeHtml(item.title)}</h4>
+          <small>${escapeHtml(item.subtitle)}</small>
+        </article>`;
+      }).join('');
+      const statPills = [
+        {
+          label: 'Tickets analysés',
+          value: Number(report?.issueCount || 0).toLocaleString('fr-FR'),
+          note: 'périmètre 2025',
+        },
+        {
+          label: 'Saisies retenues',
+          value: Number(report?.worklogCount || 0).toLocaleString('fr-FR'),
+          note: 'après filtrage',
+        },
+        {
+          label: 'Sous-tâches bench',
+          value: Number(benchDetails?.subtaskCount || 0).toLocaleString('fr-FR'),
+          note: `${formatNumber(benchDetails?.subtaskHours || 0)} h`,
+        },
+        {
+          label: 'Sous-tâches congés',
+          value: Number(leavesDetails?.subtaskCount || 0).toLocaleString('fr-FR'),
+          note: `${formatNumber(leavesDetails?.subtaskHours || 0)} h`,
+        },
+      ];
+      const statPillsHtml = statPills.map((item) => (
+        `<article class="stat-pill">
+          <strong>${escapeHtml(item.label)}</strong>
+          <p>${escapeHtml(item.value)}</p>
+          <small>${escapeHtml(item.note)}</small>
+        </article>`
+      )).join('');
+      const topProjects = (report?.projects || [])
+        .map((project) => ({
+          projectKey: String(project?.projectKey || '-').trim(),
+          projectName: String(project?.projectName || '-').trim(),
+          hours: Number(project?.hours || 0),
+        }))
+        .filter((project) => project.hours > 0)
+        .sort((left, right) => right.hours - left.hours)
+        .slice(0, 5)
+        .map((project) => ({
+          ...project,
+          share: summary.workedHours > 0 ? (project.hours / summary.workedHours) * 100 : 0,
+        }));
+      const topProjectsHtml = topProjects.length
+        ? topProjects.map((project) => {
+          const share = clampPercent(project.share);
+          return `<article class="project-share-card">
+            <div class="project-share-head">
+              <strong>${escapeHtml(project.projectKey)}</strong>
+              <span>${escapeHtml(formatPercent(share))}</span>
+            </div>
+            <p>${escapeHtml(project.projectName)}</p>
+            <div class="project-share-track" role="presentation">
+              <span style="width:${share}%"></span>
+            </div>
+            <small>${escapeHtml(`${formatNumber(project.hours)} h`)}</small>
+          </article>`;
+        }).join('')
+        : '<p class="empty">Aucun projet avec temps saisi.</p>';
 
       const toRows = (items, headers, rowBuilder) => {
         if (!Array.isArray(items) || !items.length) {
@@ -1753,9 +1827,177 @@ export default function App() {
       font-size: 12px;
       color: #476042;
     }
-    .cards {
+    .account-badge {
+      display: grid;
+      gap: 2px;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(107, 141, 89, 0.35);
+      background: rgba(255, 255, 255, 0.75);
+    }
+    .account-badge strong {
+      color: #2d4b2c;
+    }
+    .account-badge-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .account-badge-meta {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .account-badge-meta small {
+      color: #567255;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    .account-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid rgba(107, 141, 89, 0.35);
+      object-fit: cover;
+      background: rgba(255, 255, 255, 0.9);
+      flex: 0 0 auto;
+    }
+    .account-avatar.fallback {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #466045;
+      background: linear-gradient(145deg, rgba(232, 245, 216, 0.96), rgba(248, 255, 241, 0.96));
+    }
+    .account-badge span {
+      color: #50694a;
+      font-size: 13px;
+    }
+    .account-badge.warn {
+      border-color: rgba(195, 143, 61, 0.6);
+      background: rgba(255, 248, 231, 0.86);
+    }
+    .account-badge.warn strong {
+      color: #6b4a1f;
+    }
+    .account-badge.info {
+      border-color: rgba(93, 142, 154, 0.55);
+      background: rgba(239, 249, 250, 0.88);
+    }
+    .progress-dashboard {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .summary-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 12px;
+    }
+    .summary-main {
+      min-width: 0;
+    }
+    .summary-aside {
+      min-width: 0;
+      border: 1px solid rgba(145, 170, 118, 0.22);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(250, 253, 246, 0.85);
+    }
+    .summary-aside h3 {
+      margin-top: 0;
+    }
+    .progress-card {
+      border: 1px solid rgba(145, 170, 118, 0.24);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.66);
+      display: grid;
+      justify-items: center;
+      text-align: center;
+      gap: 6px;
+    }
+    .progress-card h4 {
+      margin: 0;
+      font-size: 14px;
+      color: #4f6341;
+    }
+    .progress-card small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .progress-circle {
+      --pct: 0%;
+      width: 96px;
+      height: 96px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      background: conic-gradient(var(--ring-color, #7fa567) var(--pct), rgba(220, 229, 205, 0.8) var(--pct));
+    }
+    .progress-circle::before {
+      content: '';
+      position: absolute;
+      inset: 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(141, 167, 114, 0.22);
+    }
+    .progress-circle span {
+      position: relative;
+      z-index: 1;
+      font-weight: 700;
+      color: #4f6642;
+      font-size: 14px;
+    }
+    .progress-circle.tone-leaf {
+      --ring-color: #7fa567;
+    }
+    .progress-circle.tone-sun {
+      --ring-color: #dda262;
+    }
+    .progress-circle.tone-sky {
+      --ring-color: #8fb6ba;
+    }
+    .progress-circle.tone-rose {
+      --ring-color: #d78e83;
+    }
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+    .stat-pill {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fbfdf7;
+    }
+    .stat-pill strong {
+      display: block;
+      font-size: 12px;
+      color: #5d7756;
+    }
+    .stat-pill p {
+      margin: 6px 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #42593a;
+    }
+    .stat-pill small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     .card {
@@ -1776,6 +2018,52 @@ export default function App() {
       color: #42593a;
     }
     .card small {
+      color: #6c8467;
+      font-size: 11px;
+    }
+    .project-share-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .project-share-card {
+      border: 1px solid #d7e2cb;
+      border-radius: 10px;
+      padding: 9px 10px;
+      background: #fff;
+      display: grid;
+      gap: 4px;
+    }
+    .project-share-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      color: #4f6341;
+      font-size: 12px;
+    }
+    .project-share-head strong {
+      font-size: 13px;
+      color: #3f5637;
+    }
+    .project-share-card p {
+      margin: 0;
+      font-size: 12px;
+      color: #566c50;
+    }
+    .project-share-track {
+      height: 7px;
+      border-radius: 999px;
+      background: #e9f0de;
+      overflow: hidden;
+    }
+    .project-share-track span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #89b36e, #6e9f8a);
+    }
+    .project-share-card small {
       color: #6c8467;
       font-size: 11px;
     }
@@ -1806,6 +2094,9 @@ export default function App() {
       color: #445a3d;
       font-weight: 700;
     }
+    tbody tr:nth-child(even) td {
+      background: #fafdf6;
+    }
     .empty {
       margin: 0;
       color: #6d8169;
@@ -1826,6 +2117,12 @@ export default function App() {
       body { background: #fff; }
       .page { max-width: none; padding: 8mm; }
       .panel { break-inside: avoid; }
+      .summary-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .stat-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
   </style>
 </head>
@@ -1844,27 +2141,53 @@ export default function App() {
 
     <section class="panel">
       <h2>Résumé</h2>
-      <div class="cards">
-        <article class="card">
-          <strong>Heures travaillées</strong>
-          <p>${escapeHtml(`${formatNumber(summary.workedHours)} h`)}</p>
-          <small>Total des heures de travail en 2025.</small>
-        </article>
-        <article class="card">
-          <strong>Congés / absences</strong>
-          <p>${escapeHtml(`${formatNumber(summary.leavesHours)} h`)}</p>
-          <small>${escapeHtml(`${formatNumber(summary.leavesDays)} jours`)}</small>
-        </article>
-        <article class="card">
-          <strong>Taux bench</strong>
-          <p>${escapeHtml(formatPercent(summary.benchRate))}</p>
-          <small>${escapeHtml(`${formatNumber(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
-        </article>
-        <article class="card">
-          <strong>Taux d'utilisation</strong>
-          <p>${escapeHtml(formatPercent(summary.utilizationRate))}</p>
-          <small>Formule: 100 % - taux bench.</small>
-        </article>
+      <div class="account-badge ${accountBadgeClass}">
+        <div class="account-badge-head">
+          ${avatarHtml}
+          <div class="account-badge-meta">
+            <strong>Compte analysé : ${escapeHtml(analysisInfo?.resolvedEmail || analysedUser)}</strong>
+            ${analysisInfo?.displayName ? `<small>${escapeHtml(analysisInfo.displayName)}</small>` : ''}
+          </div>
+        </div>
+        <span>${escapeHtml(analysisInfo?.message || 'Analyse de vos données.')}</span>
+      </div>
+      <div class="stat-strip">
+        ${statPillsHtml}
+      </div>
+      <div class="summary-layout">
+        <div class="summary-main">
+          <div class="progress-dashboard">
+            ${circlesHtml}
+          </div>
+          <div class="cards">
+            <article class="card">
+              <strong>Heures travaillées</strong>
+              <p>${escapeHtml(`${formatNumber(summary.workedHours)} h`)}</p>
+              <small>Total des heures de travail en 2025.</small>
+            </article>
+            <article class="card">
+              <strong>Congés / absences</strong>
+              <p>${escapeHtml(`${formatNumber(summary.leavesHours)} h`)}</p>
+              <small>${escapeHtml(`${formatNumber(summary.leavesDays)} jours`)}</small>
+            </article>
+            <article class="card">
+              <strong>Taux bench</strong>
+              <p>${escapeHtml(formatPercent(summary.benchRate))}</p>
+              <small>${escapeHtml(`${formatNumber(summary.benchHours)} h sur ${BENCH_SCOPE_KEY}`)}</small>
+            </article>
+            <article class="card">
+              <strong>Taux d'utilisation</strong>
+              <p>${escapeHtml(formatPercent(summary.utilizationRate))}</p>
+              <small>Formule: 100 % - taux bench.</small>
+            </article>
+          </div>
+        </div>
+        <aside class="summary-aside">
+          <h3>Top projets (part des heures)</h3>
+          <div class="project-share-grid">
+            ${topProjectsHtml}
+          </div>
+        </aside>
       </div>
       <p class="narrative">${escapeHtml(benchNarrative)}</p>
     </section>
